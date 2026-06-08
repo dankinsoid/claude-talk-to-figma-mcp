@@ -5,6 +5,9 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import WebSocket from "ws";
 import { v4 as uuidv4 } from "uuid";
+import { writeFile, mkdir } from "fs/promises";
+import { tmpdir } from "os";
+import { dirname, join } from "path";
 import { shapeNode, type DetailProfile } from "./shape.js";
 
 // Define TypeScript interfaces for Figma responses
@@ -86,21 +89,65 @@ const serverArg = args.find(arg => arg.startsWith('--server='));
 const serverUrl = serverArg ? serverArg.split('=')[1] : 'localhost';
 const WS_URL = serverUrl === 'localhost' ? `ws://${serverUrl}` : `wss://${serverUrl}`;
 
+// Opt-in for routing large read-tool output to a file instead of the LLM
+// context. Returning a path keeps big payloads out of the token budget.
+const saveParams = {
+  saveToFile: z
+    .boolean()
+    .optional()
+    .describe(
+      "If true, write the full result to a file and return only its path + byte size instead of the payload. Use for large outputs to keep them out of the LLM context."
+    ),
+  outputPath: z
+    .string()
+    .optional()
+    .describe(
+      "Explicit file path to write the result to (implies saveToFile). Parent dirs are created. Defaults to an auto-named file under the OS temp dir."
+    ),
+};
+
+type SaveArgs = { saveToFile?: boolean; outputPath?: string };
+
+// Monotonic suffix so two writes within the same millisecond never collide.
+let outputFileSeq = 0;
+
+async function writeOutputFile(
+  baseName: string,
+  ext: string,
+  data: string | Buffer,
+  outputPath?: string
+): Promise<{ path: string; bytes: number }> {
+  const safeBase = baseName.replace(/[^a-zA-Z0-9_-]/g, "-");
+  const target = outputPath
+    ? outputPath
+    : join(tmpdir(), "talk-to-figma", `${safeBase}-${Date.now()}-${outputFileSeq++}.${ext}`);
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(target, data);
+  const bytes = typeof data === "string" ? Buffer.byteLength(data) : data.length;
+  return { path: target, bytes };
+}
+
+// Render a JSON payload either inline or, when save is requested, to a file —
+// returning a single content block (the path pointer when saved).
+async function jsonContent(payload: any, save: SaveArgs, baseName: string) {
+  const text = JSON.stringify(payload);
+  if (save?.saveToFile || save?.outputPath) {
+    const { path, bytes } = await writeOutputFile(baseName, "json", text, save.outputPath);
+    return { type: "text" as const, text: `Saved ${bytes} bytes of JSON to ${path}` };
+  }
+  return { type: "text" as const, text };
+}
+
 // Document Info Tool
 server.tool(
   "get_document_info",
   "Get detailed information about the current Figma document",
-  {},
-  async () => {
+  { ...saveParams },
+  async ({ saveToFile, outputPath }: any) => {
     try {
       const result = await sendCommandToFigma("get_document_info");
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(result)
-          }
-        ]
+        content: [await jsonContent(result, { saveToFile, outputPath }, "document-info")]
       };
     } catch (error) {
       return {
@@ -120,17 +167,12 @@ server.tool(
 server.tool(
   "get_selection",
   "Get information about the current selection in Figma",
-  {},
-  async () => {
+  { ...saveParams },
+  async ({ saveToFile, outputPath }: any) => {
     try {
       const result = await sendCommandToFigma("get_selection");
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(result)
-          }
-        ]
+        content: [await jsonContent(result, { saveToFile, outputPath }, "selection")]
       };
     } catch (error) {
       return {
@@ -197,8 +239,9 @@ server.tool(
   "Get information about the current selection in Figma, compacted for low token cost. Same detail/depth/collapse controls as get_node_info.",
   {
     ...shapeParams,
+    ...saveParams,
   },
-  async ({ detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe }: any) => {
+  async ({ detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe, saveToFile, outputPath }: any) => {
     try {
       const opts: ShapeArgs = { detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe };
       const result = await sendCommandToFigma("read_my_design", {});
@@ -206,12 +249,7 @@ server.tool(
         ? result.map((r: any) => (r && r.document ? { ...r, document: shapeNode(r.document, opts) } : r))
         : result;
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(shaped)
-          }
-        ]
+        content: [await jsonContent(shaped, { saveToFile, outputPath }, "my-design")]
       };
     } catch (error) {
       return {
@@ -234,17 +272,14 @@ server.tool(
   {
     nodeId: z.string().describe("The ID of the node to get information about"),
     ...shapeParams,
+    ...saveParams,
   },
-  async ({ nodeId, detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe }: any) => {
+  async ({ nodeId, detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe, saveToFile, outputPath }: any) => {
     try {
       const result = await sendCommandToFigma("get_node_info", { nodeId });
+      const shaped = shapeNode(result, { detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe });
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(shapeNode(result, { detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe }))
-          }
-        ]
+        content: [await jsonContent(shaped, { saveToFile, outputPath }, "node-info")]
       };
     } catch (error) {
       return {
@@ -370,8 +405,9 @@ server.tool(
   {
     nodeIds: z.array(z.string()).describe("Array of node IDs to get information about"),
     ...shapeParams,
+    ...saveParams,
   },
-  async ({ nodeIds, detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe }: any) => {
+  async ({ nodeIds, detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe, saveToFile, outputPath }: any) => {
     try {
       const opts: ShapeArgs = { detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe };
       const results = await Promise.all(
@@ -380,13 +416,9 @@ server.tool(
           return { nodeId, info: result };
         })
       );
+      const shaped = results.map((result) => shapeNode(result.info, opts));
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(results.map((result) => shapeNode(result.info, opts)))
-          }
-        ]
+        content: [await jsonContent(shaped, { saveToFile, outputPath }, "nodes-info")]
       };
     } catch (error) {
       return {
@@ -917,15 +949,42 @@ server.tool(
       .optional()
       .describe("Export format"),
     scale: z.number().positive().optional().describe("Export scale"),
+    outputPath: z
+      .string()
+      .optional()
+      .describe(
+        "If set, decode the image and write it to this file path, returning the path instead of the base64 data. Strongly preferred — inline image data is very expensive in the LLM context. Parent dirs are created."
+      ),
+    saveToFile: z
+      .boolean()
+      .optional()
+      .describe(
+        "If true (and no outputPath given), write the image to an auto-named file under the OS temp dir and return its path instead of inline base64."
+      ),
   },
-  async ({ nodeId, format, scale }: any) => {
+  async ({ nodeId, format, scale, outputPath, saveToFile }: any) => {
     try {
+      const fmt = format || "PNG";
       const result = await sendCommandToFigma("export_node_as_image", {
         nodeId,
-        format: format || "PNG",
+        format: fmt,
         scale: scale || 1,
       });
       const typedResult = result as { imageData: string; mimeType: string };
+
+      if (outputPath || saveToFile) {
+        const ext = fmt.toLowerCase() === "jpg" ? "jpg" : fmt.toLowerCase();
+        const buffer = Buffer.from(typedResult.imageData, "base64");
+        const { path, bytes } = await writeOutputFile(`export-${nodeId}`, ext, buffer, outputPath);
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Exported ${fmt} (${bytes} bytes) to ${path}`,
+            },
+          ],
+        };
+      }
 
       return {
         content: [
@@ -991,17 +1050,12 @@ server.tool(
 server.tool(
   "get_styles",
   "Get all styles from the current Figma document",
-  {},
-  async () => {
+  { ...saveParams },
+  async ({ saveToFile, outputPath }: any) => {
     try {
       const result = await sendCommandToFigma("get_styles");
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(result)
-          }
-        ]
+        content: [await jsonContent(result, { saveToFile, outputPath }, "styles")]
       };
     } catch (error) {
       return {
@@ -1021,17 +1075,12 @@ server.tool(
 server.tool(
   "get_local_components",
   "Get all local components from the Figma document",
-  {},
-  async () => {
+  { ...saveParams },
+  async ({ saveToFile, outputPath }: any) => {
     try {
       const result = await sendCommandToFigma("get_local_components");
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(result)
-          }
-        ]
+        content: [await jsonContent(result, { saveToFile, outputPath }, "local-components")]
       };
     } catch (error) {
       return {
@@ -1053,21 +1102,17 @@ server.tool(
   "Get all annotations in the current document or specific node",
   {
     nodeId: z.string().describe("node ID to get annotations for specific node"),
-    includeCategories: z.boolean().optional().default(true).describe("Whether to include category information")
+    includeCategories: z.boolean().optional().default(true).describe("Whether to include category information"),
+    ...saveParams,
   },
-  async ({ nodeId, includeCategories }: any) => {
+  async ({ nodeId, includeCategories, saveToFile, outputPath }: any) => {
     try {
       const result = await sendCommandToFigma("get_annotations", {
         nodeId,
         includeCategories
       });
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(result)
-          }
-        ]
+        content: [await jsonContent(result, { saveToFile, outputPath }, "annotations")]
       };
     } catch (error) {
       return {
@@ -1542,8 +1587,9 @@ server.tool(
   "Scan all text nodes in the selected Figma node",
   {
     nodeId: z.string().describe("ID of the node to scan"),
+    ...saveParams,
   },
-  async ({ nodeId }: any) => {
+  async ({ nodeId, saveToFile, outputPath }: any) => {
     try {
       // Initial response to indicate we're starting the process
       const initialStatus = {
@@ -1581,10 +1627,7 @@ server.tool(
               type: "text" as const,
               text: summaryText
             },
-            {
-              type: "text" as const,
-              text: JSON.stringify(typedResult.textNodes, null, 2)
-            }
+            await jsonContent(typedResult.textNodes, { saveToFile, outputPath }, "text-nodes")
           ],
         };
       }
@@ -1593,10 +1636,7 @@ server.tool(
       return {
         content: [
           initialStatus,
-          {
-            type: "text",
-            text: JSON.stringify(result, null, 2),
-          },
+          await jsonContent(result, { saveToFile, outputPath }, "text-nodes"),
         ],
       };
     } catch (error) {
@@ -1619,9 +1659,10 @@ server.tool(
   "Scan for child nodes with specific types in the selected Figma node",
   {
     nodeId: z.string().describe("ID of the node to scan"),
-    types: z.array(z.string()).describe("Array of node types to find in the child nodes (e.g. ['COMPONENT', 'FRAME'])")
+    types: z.array(z.string()).describe("Array of node types to find in the child nodes (e.g. ['COMPONENT', 'FRAME'])"),
+    ...saveParams,
   },
-  async ({ nodeId, types }: any) => {
+  async ({ nodeId, types, saveToFile, outputPath }: any) => {
     try {
       // Initial response to indicate we're starting the process
       const initialStatus = {
@@ -1663,10 +1704,7 @@ server.tool(
               type: "text" as const,
               text: summaryText
             },
-            {
-              type: "text" as const,
-              text: JSON.stringify(typedResult.matchingNodes, null, 2)
-            }
+            await jsonContent(typedResult.matchingNodes, { saveToFile, outputPath }, "matching-nodes")
           ],
         };
       }
@@ -1675,10 +1713,7 @@ server.tool(
       return {
         content: [
           initialStatus,
-          {
-            type: "text",
-            text: JSON.stringify(result, null, 2),
-          },
+          await jsonContent(result, { saveToFile, outputPath }, "matching-nodes"),
         ],
       };
     } catch (error) {
@@ -2400,16 +2435,14 @@ server.tool(
   "Get Figma Prototyping Reactions from multiple nodes. CRITICAL: The output MUST be processed using the 'reaction_to_connector_strategy' prompt IMMEDIATELY to generate parameters for connector lines via the 'create_connections' tool.",
   {
     nodeIds: z.array(z.string()).describe("Array of node IDs to get reactions from"),
+    ...saveParams,
   },
-  async ({ nodeIds }: any) => {
+  async ({ nodeIds, saveToFile, outputPath }: any) => {
     try {
       const result = await sendCommandToFigma("get_reactions", { nodeIds });
       return {
         content: [
-          {
-            type: "text",
-            text: JSON.stringify(result)
-          },
+          await jsonContent(result, { saveToFile, outputPath }, "reactions"),
           {
             type: "text",
             text: "IMPORTANT: You MUST now use the reaction data above and follow the `reaction_to_connector_strategy` prompt to prepare the parameters for the `create_connections` tool call. This is a required next step."
