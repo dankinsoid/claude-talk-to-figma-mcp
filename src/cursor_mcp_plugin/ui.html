@@ -1187,7 +1187,7 @@
         if (state.statusKind !== "connected" || !state.channel) return;
         // Copy a ready-to-paste instruction so the agent can join without
         // needing it explained.
-        copyText(`Подключись к каналу Figma плагина: ${state.channel}`);
+        copyText(`Join the Figma plugin channel: ${state.channel}`);
         const prev = badgeChannel.textContent;
         badgeChannel.textContent = "Copied!";
         setTimeout(() => {
