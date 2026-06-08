@@ -5,7 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import WebSocket from "ws";
 import { v4 as uuidv4 } from "uuid";
-import { writeFile, mkdir } from "fs/promises";
+import { writeFile, readFile, mkdir } from "fs/promises";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { shapeNode, type DetailProfile } from "./shape.js";
@@ -3103,29 +3103,93 @@ function sendCommandToFigma(
   });
 }
 
+// Channels opened by a Figma plugin, written by the WebSocket relay (socket.ts).
+const ACTIVE_CHANNELS_FILE = join(tmpdir(), "figma-active-channels.json");
+
+interface ActiveChannel {
+  channel: string;
+  clients: number;
+}
+
+// Read the channels the relay recorded as plugin-opened. Returns [] when the
+// file is missing (relay not started, or no plugin connected yet).
+async function readActiveChannels(): Promise<ActiveChannel[]> {
+  try {
+    const raw = await readFile(ACTIVE_CHANNELS_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed?.channels) ? parsed.channels : [];
+  } catch {
+    return [];
+  }
+}
+
+server.tool(
+  "get_active_channel",
+  "Get the channel(s) the Figma plugin currently has open, as recorded by the WebSocket relay. Use this to discover the channel to join without asking the user to paste it.",
+  {},
+  async () => {
+    const active = await readActiveChannels();
+    if (active.length === 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "No active plugin channel found. Make sure the WebSocket relay (bun socket) is running and the Figma plugin is connected.",
+          },
+        ],
+      };
+    }
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ active, currentChannel }, null, 2),
+        },
+      ],
+    };
+  }
+);
+
 // Update the join_channel tool
 server.tool(
   "join_channel",
-  "Join a specific channel to communicate with Figma",
+  "Join a specific channel to communicate with Figma. Leave channel empty to auto-join the channel the plugin currently has open (when exactly one is active).",
   {
     channel: z.string().describe("The name of the channel to join").default(""),
   },
   async ({ channel }: any) => {
     try {
       if (!channel) {
-        // If no channel provided, ask the user for input
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Please provide a channel name to join:",
+        // Try to auto-discover the plugin's open channel before asking the user.
+        const active = await readActiveChannels();
+        if (active.length === 1) {
+          channel = active[0].channel;
+        } else if (active.length > 1) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Multiple active channels found, pass one explicitly: ${active
+                  .map((c) => c.channel)
+                  .join(", ")}`,
+              },
+            ],
+          };
+        } else {
+          // No active channel recorded — fall back to asking the user.
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Please provide a channel name to join:",
+              },
+            ],
+            followUp: {
+              tool: "join_channel",
+              description: "Join the specified channel",
             },
-          ],
-          followUp: {
-            tool: "join_channel",
-            description: "Join the specified channel",
-          },
-        };
+          };
+        }
       }
 
       await joinChannel(channel);

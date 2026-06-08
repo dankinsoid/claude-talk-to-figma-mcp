@@ -2605,27 +2605,77 @@ function sendCommandToFigma(command, params = {}, timeoutMs = 3e4) {
     ws.send(JSON.stringify(request));
   });
 }
+var ACTIVE_CHANNELS_FILE = (0, import_path.join)((0, import_os.tmpdir)(), "figma-active-channels.json");
+async function readActiveChannels() {
+  try {
+    const raw = await (0, import_promises.readFile)(ACTIVE_CHANNELS_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed?.channels) ? parsed.channels : [];
+  } catch {
+    return [];
+  }
+}
+server.tool(
+  "get_active_channel",
+  "Get the channel(s) the Figma plugin currently has open, as recorded by the WebSocket relay. Use this to discover the channel to join without asking the user to paste it.",
+  {},
+  async () => {
+    const active = await readActiveChannels();
+    if (active.length === 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "No active plugin channel found. Make sure the WebSocket relay (bun socket) is running and the Figma plugin is connected."
+          }
+        ]
+      };
+    }
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ active, currentChannel }, null, 2)
+        }
+      ]
+    };
+  }
+);
 server.tool(
   "join_channel",
-  "Join a specific channel to communicate with Figma",
+  "Join a specific channel to communicate with Figma. Leave channel empty to auto-join the channel the plugin currently has open (when exactly one is active).",
   {
     channel: import_zod.z.string().describe("The name of the channel to join").default("")
   },
   async ({ channel }) => {
     try {
       if (!channel) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Please provide a channel name to join:"
+        const active = await readActiveChannels();
+        if (active.length === 1) {
+          channel = active[0].channel;
+        } else if (active.length > 1) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Multiple active channels found, pass one explicitly: ${active.map((c) => c.channel).join(", ")}`
+              }
+            ]
+          };
+        } else {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Please provide a channel name to join:"
+              }
+            ],
+            followUp: {
+              tool: "join_channel",
+              description: "Join the specified channel"
             }
-          ],
-          followUp: {
-            tool: "join_channel",
-            description: "Join the specified channel"
-          }
-        };
+          };
+        }
       }
       await joinChannel(channel);
       return {

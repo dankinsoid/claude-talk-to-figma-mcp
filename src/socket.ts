@@ -1,9 +1,32 @@
 #!/usr/bin/env bun
 
 import { Server, ServerWebSocket } from "bun";
+import { tmpdir } from "os";
+import { join } from "path";
 
 // Store clients by channel
 const channels = new Map<string, Set<ServerWebSocket<any>>>();
+
+// Channels opened by a Figma plugin (role: "plugin" on join). Persisted to disk
+// so the MCP server can discover the active channel without joining first.
+const pluginChannels = new Map<ServerWebSocket<any>, string>();
+
+// Shared with the MCP server (get_active_channel reads this same path).
+const ACTIVE_CHANNELS_FILE = join(tmpdir(), "figma-active-channels.json");
+
+function writeActiveChannels() {
+  const counts = new Map<string, number>();
+  for (const channel of pluginChannels.values()) {
+    counts.set(channel, channels.get(channel)?.size ?? 0);
+  }
+  const payload = {
+    updatedAt: new Date().toISOString(),
+    channels: [...counts].map(([channel, clients]) => ({ channel, clients })),
+  };
+  Bun.write(ACTIVE_CHANNELS_FILE, JSON.stringify(payload, null, 2)).catch((err) =>
+    console.error("Failed to write active channels file:", err)
+  );
+}
 
 function handleConnection(ws: ServerWebSocket<any>) {
   // Don't add to clients immediately - wait for channel join
@@ -107,6 +130,12 @@ const server = Bun.serve({
 
           console.log(`\n✓ Client joined channel "${channelName}" (${channelClients.size} total clients)`);
 
+          // Record plugin-opened channels so the agent can auto-discover them.
+          if (data.role === "plugin") {
+            pluginChannels.set(ws, channelName);
+            writeActiveChannels();
+          }
+
           // Notify client they joined successfully
           ws.send(JSON.stringify({
             type: "system",
@@ -204,6 +233,11 @@ const server = Bun.serve({
       channels.forEach((clients) => {
         clients.delete(ws);
       });
+
+      // Drop the plugin's channel so stale entries don't linger in the file.
+      if (pluginChannels.delete(ws)) {
+        writeActiveChannels();
+      }
     }
   }
 });

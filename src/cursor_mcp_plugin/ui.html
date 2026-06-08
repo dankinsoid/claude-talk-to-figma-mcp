@@ -665,11 +665,14 @@
             console.log("Joining channel:", channelName);
             state.channel = channelName;
 
-            // Join the channel using the same format as App.tsx
+            // Join the channel using the same format as App.tsx.
+            // role lets the relay record which channel the *plugin* opened,
+            // so the agent can discover it without copy-pasting the name.
             state.socket.send(
               JSON.stringify({
                 type: "join",
                 channel: channelName.trim(),
+                role: "plugin",
               })
             );
           };
