@@ -161,7 +161,7 @@ const shapeParams = {
     .int()
     .min(1)
     .optional()
-    .describe("Soft node budget (default 60). The tree expands breadth-first until ~this many nodes are emitted; the rest become stubs with {childCount, more:true}. Raise to see more at once, lower for a terser overview."),
+    .describe("Soft node budget (default 100). The tree expands breadth-first until ~this many nodes are emitted; the rest become stubs with {childCount, more:true}. Raise to see more at once, lower for a terser overview."),
   depth: z
     .number()
     .int()

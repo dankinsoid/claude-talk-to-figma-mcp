@@ -26,7 +26,7 @@ export interface ShapeOptions {
   /**
    * Soft node budget: the tree expands breadth-first until ~this many nodes are
    * emitted, then the rest become drill-in stubs. Keeps response size roughly
-   * constant regardless of tree shape. Default 60.
+   * constant regardless of tree shape. Default 100.
    */
   maxNodes?: number;
   /** Optional hard depth cap (levels of children). Default: unbounded (budget governs). */
@@ -140,10 +140,10 @@ function isIcon(node: any, curDepth: number): boolean {
   return hasNoText(node) && allLeavesVector(node);
 }
 
-function box(node: any): number[] | undefined {
+function box(node: any): { x: number; y: number; w: number; h: number } | undefined {
   const b = node.absoluteBoundingBox;
   if (!b) return undefined;
-  return [round(b.x), round(b.y), round(b.width), round(b.height)];
+  return { x: round(b.x), y: round(b.y), w: round(b.width), h: round(b.height) };
 }
 
 type Stack = "h" | "v" | null;
@@ -181,20 +181,29 @@ function axisSize(node: any, parent: Stack, self: Stack, dim: "w" | "h", px: num
 }
 
 /**
- * Collapse padding: single value when uniform, {vertical,horizontal} for
- * symmetric pairs, else [top,right,bottom,left].
+ * Collapse padding to the most compact self-describing form: a single value
+ * when uniform, {vertical,horizontal} for symmetric pairs, else a {top,right,
+ * bottom,left} object. Object forms omit zero sides. Keyed (not positional) so
+ * the agent never has to recall an order.
  */
-function padOf(
-  node: any
-): number | number[] | { vertical: number; horizontal: number } | undefined {
+function padOf(node: any): number | Record<string, number> | undefined {
   const t = round(node.paddingTop || 0);
   const r = round(node.paddingRight || 0);
   const b = round(node.paddingBottom || 0);
   const l = round(node.paddingLeft || 0);
   if (!(t || r || b || l)) return undefined;
   if (t === r && r === b && b === l) return t;
-  if (t === b && l === r) return { vertical: t, horizontal: l };
-  return [t, r, b, l];
+  const o: Record<string, number> = {};
+  if (t === b && l === r) {
+    if (t) o.vertical = t;
+    if (l) o.horizontal = l;
+    return o;
+  }
+  if (t) o.top = t;
+  if (r) o.right = r;
+  if (b) o.bottom = b;
+  if (l) o.left = l;
+  return o;
 }
 
 /** Emit auto-layout container spec: stack/gap/padding/align (positions, not coords). */
@@ -239,8 +248,11 @@ function planExpansion(root: any, opts: Required<ShapeOptions>): Set<string> {
 }
 
 /** Minimal stub for a truncated node: identity + extent + a drill-in marker. */
-function stubNode(node: any): any {
+function stubNode(node: any, collapseIcons: boolean): any {
   const out: any = { id: node.id, name: node.name, type: node.type };
+  // A truncated icon reads better as ICON than a generic stub (stubs are always
+  // below the root, so depth is non-zero — icon detection is valid here).
+  if (collapseIcons && isIcon(node, 1)) out.type = "ICON";
   const b = box(node);
   if (b) out.box = b; // px extent/position so the agent isn't blind (e.g. hug nodes)
   const n = (node.children || []).length;
@@ -279,8 +291,8 @@ function shapeRec(
       if (b) {
         const w = axisSize(node, parent, myStack, "w", round(b.width));
         const h = axisSize(node, parent, myStack, "h", round(b.height));
-        // Collapse when both axes share the same non-numeric mode (fill/hug).
-        out.size = w === h && typeof w === "string" ? w : [w, h];
+        // Collapse to a bare "fill"/"hug" when both axes share that mode.
+        out.size = w === h && typeof w === "string" ? w : { w, h };
       }
     } else {
       const b = box(node);
@@ -306,7 +318,7 @@ function shapeRec(
   if (kids.length) {
     if (expand.has(node.id)) {
       out.children = kids.map((c) =>
-        expand.has(c.id) ? shapeRec(c, opts, f, curDepth + 1, myStack, expand) : stubNode(c)
+        expand.has(c.id) ? shapeRec(c, opts, f, curDepth + 1, myStack, expand) : stubNode(c, opts.collapseIcons)
       );
     } else {
       // Node itself reached the budget edge — surface as a stub in place.
@@ -360,7 +372,7 @@ function dedupe(root: any): Record<string, any> | undefined {
  */
 export function shapeNode(node: any, options: ShapeOptions = {}): any {
   const opts: Required<ShapeOptions> = {
-    maxNodes: options.maxNodes ?? 60,
+    maxNodes: options.maxNodes ?? 100,
     depth: options.depth ?? Infinity,
     detail: options.detail ?? "auto",
     collapseIcons: options.collapseIcons ?? true,
