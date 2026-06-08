@@ -951,13 +951,10 @@ server.tool(
     format: z.enum(["PNG", "JPG", "SVG", "PDF"]).optional().describe("Export format"),
     scale: z.number().positive().optional().describe("Export scale"),
     outputPath: z.string().optional().describe(
-      "If set, decode the image and write it to this file path, returning the path instead of the base64 data. Strongly preferred \u2014 inline image data is very expensive in the LLM context. Parent dirs are created."
-    ),
-    saveToFile: z.boolean().optional().describe(
-      "If true (and no outputPath given), write the image to an auto-named file under the OS temp dir and return its path instead of inline base64."
+      "File path to write the exported image to. Parent dirs are created. Defaults to an auto-named file under the OS temp dir. The image is always written to disk \u2014 only the path is returned, never inline base64 (which is very expensive in the LLM context)."
     )
   },
-  async ({ nodeId, format, scale, outputPath, saveToFile }) => {
+  async ({ nodeId, format, scale, outputPath }) => {
     try {
       const fmt = format || "PNG";
       const result = await sendCommandToFigma("export_node_as_image", {
@@ -966,25 +963,14 @@ server.tool(
         scale: scale || 1
       });
       const typedResult = result;
-      if (outputPath || saveToFile) {
-        const ext = fmt.toLowerCase() === "jpg" ? "jpg" : fmt.toLowerCase();
-        const buffer = Buffer.from(typedResult.imageData, "base64");
-        const { path, bytes } = await writeOutputFile(`export-${nodeId}`, ext, buffer, outputPath);
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Exported ${fmt} (${bytes} bytes) to ${path}`
-            }
-          ]
-        };
-      }
+      const ext = fmt.toLowerCase() === "jpg" ? "jpg" : fmt.toLowerCase();
+      const buffer = Buffer.from(typedResult.imageData, "base64");
+      const { path, bytes } = await writeOutputFile(`export-${nodeId}`, ext, buffer, outputPath);
       return {
         content: [
           {
-            type: "image",
-            data: typedResult.imageData,
-            mimeType: typedResult.mimeType || "image/png"
+            type: "text",
+            text: `Exported ${fmt} (${bytes} bytes) to ${path}`
           }
         ]
       };
