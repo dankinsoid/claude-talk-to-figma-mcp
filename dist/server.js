@@ -6,6 +6,175 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import WebSocket from "ws";
 import { v4 as uuidv4 } from "uuid";
+
+// src/talk_to_figma_mcp/shape.ts
+var PROFILES = {
+  skeleton: { box: false, style: false, text: false, full: false },
+  box: { box: true, style: false, text: false, full: false },
+  style: { box: true, style: true, text: false, full: false },
+  text: { box: true, style: false, text: true, full: false },
+  auto: { box: true, style: false, text: true, full: false },
+  full: { box: true, style: true, text: true, full: true }
+};
+var VECTOR_LEAF = /* @__PURE__ */ new Set([
+  "VECTOR",
+  "BOOLEAN_OPERATION",
+  "ELLIPSE",
+  "STAR",
+  "POLYGON",
+  "LINE",
+  "RECTANGLE"
+]);
+var round = (n, p = 0) => {
+  const f = Math.pow(10, p);
+  return Math.round(n * f) / f;
+};
+function colorToHex(color) {
+  if (typeof color === "string") return color;
+  const r = Math.round(color.r * 255);
+  const g = Math.round(color.g * 255);
+  const b = Math.round(color.b * 255);
+  const a = color.a !== void 0 ? Math.round(color.a * 255) : 255;
+  const hex = (x) => x.toString(16).padStart(2, "0");
+  return `#${hex(r)}${hex(g)}${hex(b)}${a === 255 ? "" : hex(a)}`;
+}
+function compactPaint(paint, full) {
+  const p = { type: paint.type };
+  if (paint.visible === false) p.visible = false;
+  if (paint.opacity !== void 0 && paint.opacity !== 1) p.opacity = round(paint.opacity, 2);
+  if (paint.color) p.color = colorToHex(paint.color);
+  if (paint.gradientStops) {
+    p.stops = paint.gradientStops.map(
+      (s) => `${colorToHex(s.color)}@${round(s.position, 2)}`
+    );
+  }
+  if (paint.scaleMode) p.scaleMode = paint.scaleMode;
+  if (full && paint.gradientHandlePositions) {
+    p.handles = paint.gradientHandlePositions.map((h) => [round(h.x, 3), round(h.y, 3)]);
+  }
+  return p;
+}
+function compactTextStyle(s, full) {
+  const o = {};
+  if (s.fontFamily) o.font = s.fontFamily;
+  if (s.fontStyle && s.fontStyle !== "Regular") o.fontStyle = s.fontStyle;
+  if (s.fontWeight && s.fontWeight !== 400) o.weight = s.fontWeight;
+  if (s.fontSize) o.size = round(s.fontSize, 1);
+  if (s.textAlignHorizontal && s.textAlignHorizontal !== "LEFT") o.align = s.textAlignHorizontal;
+  if (s.letterSpacing) o.letterSpacing = round(s.letterSpacing, 2);
+  if (full && s.lineHeightPx) o.lineHeight = round(s.lineHeightPx, 1);
+  return o;
+}
+function hasNoText(node) {
+  if (node.type === "TEXT") return false;
+  if (node.children) return node.children.every(hasNoText);
+  return true;
+}
+function allLeavesVector(node) {
+  if (!node.children || node.children.length === 0) {
+    return VECTOR_LEAF.has(node.type);
+  }
+  return node.children.every(allLeavesVector);
+}
+function hasAnyLeaf(node) {
+  if (!node.children || node.children.length === 0) return true;
+  return node.children.some(hasAnyLeaf);
+}
+function isIcon(node, curDepth) {
+  if (curDepth === 0) return false;
+  if (!node.children || node.children.length === 0) return false;
+  if (!hasAnyLeaf(node)) return false;
+  return hasNoText(node) && allLeavesVector(node);
+}
+function box(node) {
+  const b = node.absoluteBoundingBox;
+  if (!b) return void 0;
+  return [round(b.x), round(b.y), round(b.width), round(b.height)];
+}
+function shapeRec(node, opts, f, curDepth) {
+  const out = { id: node.id, name: node.name, type: node.type };
+  if (opts.collapseIcons && isIcon(node, curDepth)) {
+    out.type = "ICON";
+    if (f.box) out.box = box(node);
+    out.more = true;
+    return out;
+  }
+  if (f.box) {
+    const b = box(node);
+    if (b) out.box = b;
+  }
+  if (node.cornerRadius !== void 0 && (f.style || f.box)) {
+    out.cornerRadius = round(node.cornerRadius, 1);
+  }
+  if (f.style) {
+    if (node.fills && node.fills.length) out.fills = node.fills.map((x) => compactPaint(x, f.full));
+    if (node.strokes && node.strokes.length) out.strokes = node.strokes.map((x) => compactPaint(x, f.full));
+  }
+  if (node.characters !== void 0) out.characters = node.characters;
+  if (node.style && (f.text || f.style)) {
+    const ts = compactTextStyle(node.style, f.full);
+    if (Object.keys(ts).length) out.style = ts;
+  }
+  const kids = node.children || [];
+  if (kids.length) {
+    if (curDepth < opts.depth) {
+      out.children = kids.map((c) => shapeRec(c, opts, f, curDepth + 1));
+    } else {
+      out.childCount = kids.length;
+      out.more = true;
+    }
+  }
+  return out;
+}
+function dedupe(root) {
+  const counts = /* @__PURE__ */ new Map();
+  const walk = (n2, fn) => {
+    for (const k of ["fills", "strokes"]) {
+      if (n2[k]) fn(JSON.stringify(n2[k]));
+    }
+    if (n2.children) n2.children.forEach((c) => walk(c, fn));
+  };
+  walk(root, (key) => counts.set(key, (counts.get(key) || 0) + 1));
+  const defs = {};
+  const keyFor = /* @__PURE__ */ new Map();
+  let n = 0;
+  for (const [json, count] of counts) {
+    if (count > 1) {
+      const ref = `@${++n}`;
+      keyFor.set(json, ref);
+      defs[ref] = JSON.parse(json);
+    }
+  }
+  if (n === 0) return void 0;
+  const replace = (node) => {
+    for (const k of ["fills", "strokes"]) {
+      if (node[k]) {
+        const ref = keyFor.get(JSON.stringify(node[k]));
+        if (ref) node[k] = ref;
+      }
+    }
+    if (node.children) node.children.forEach(replace);
+  };
+  replace(root);
+  return defs;
+}
+function shapeNode(node, options = {}) {
+  const opts = {
+    depth: options.depth ?? 2,
+    detail: options.detail ?? "auto",
+    collapseIcons: options.collapseIcons ?? true,
+    dedupe: options.dedupe ?? true
+  };
+  const fields = PROFILES[opts.detail] ?? PROFILES.auto;
+  const shaped = shapeRec(node, opts, fields, 0);
+  if (opts.dedupe && fields.style) {
+    const defs = dedupe(shaped);
+    if (defs) shaped._defs = defs;
+  }
+  return shaped;
+}
+
+// src/talk_to_figma_mcp/server.ts
 var logger = {
   info: (message) => process.stderr.write(`[INFO] ${message}
 `),
@@ -83,18 +252,30 @@ server.tool(
     }
   }
 );
+var shapeParams = {
+  detail: z.enum(["skeleton", "box", "style", "text", "auto", "full"]).optional().describe(
+    "Detail profile. skeleton=structure only; box=+integer bounds; text=+characters & font; style=+fills/strokes/gradients; full=everything; auto (default)=structure+text+box. Text characters are always included."
+  ),
+  depth: z.number().int().min(0).optional().describe("How many levels of children to expand (default 2). Deeper nodes become stubs with {childCount, more:true} \u2014 re-request that id to zoom in."),
+  collapseIcons: z.boolean().optional().describe("Collapse icon-like subtrees (no text, vector leaves) to a single ICON node with more:true (default true)."),
+  dedupe: z.boolean().optional().describe("Hoist repeated fills/strokes into a shared _defs table referenced by @N strings (default true; only applies when paints are included).")
+};
 server.tool(
   "read_my_design",
-  "Get detailed information about the current selection in Figma, including all node details",
-  {},
-  async () => {
+  "Get information about the current selection in Figma, compacted for low token cost. Same detail/depth/collapse controls as get_node_info.",
+  {
+    ...shapeParams
+  },
+  async ({ detail, depth, collapseIcons, dedupe: dedupe2 }) => {
     try {
+      const opts = { detail, depth, collapseIcons, dedupe: dedupe2 };
       const result = await sendCommandToFigma("read_my_design", {});
+      const shaped = Array.isArray(result) ? result.map((r) => r && r.document ? { ...r, document: shapeNode(r.document, opts) } : r) : result;
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify(result)
+            text: JSON.stringify(shaped)
           }
         ]
       };
@@ -112,18 +293,19 @@ server.tool(
 );
 server.tool(
   "get_node_info",
-  "Get detailed information about a specific node in Figma",
+  "Get information about a specific node in Figma, compacted for low token cost. Returns a structure+text view by default; widen with detail/depth to zoom in.",
   {
-    nodeId: z.string().describe("The ID of the node to get information about")
+    nodeId: z.string().describe("The ID of the node to get information about"),
+    ...shapeParams
   },
-  async ({ nodeId }) => {
+  async ({ nodeId, detail, depth, collapseIcons, dedupe: dedupe2 }) => {
     try {
       const result = await sendCommandToFigma("get_node_info", { nodeId });
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify(filterFigmaNode(result))
+            text: JSON.stringify(shapeNode(result, { detail, depth, collapseIcons, dedupe: dedupe2 }))
           }
         ]
       };
@@ -139,89 +321,16 @@ server.tool(
     }
   }
 );
-function rgbaToHex(color) {
-  if (color.startsWith("#")) {
-    return color;
-  }
-  const r = Math.round(color.r * 255);
-  const g = Math.round(color.g * 255);
-  const b = Math.round(color.b * 255);
-  const a = Math.round(color.a * 255);
-  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}${a === 255 ? "" : a.toString(16).padStart(2, "0")}`;
-}
-function filterFigmaNode(node) {
-  if (node.type === "VECTOR") {
-    return null;
-  }
-  const filtered = {
-    id: node.id,
-    name: node.name,
-    type: node.type
-  };
-  if (node.fills && node.fills.length > 0) {
-    filtered.fills = node.fills.map((fill) => {
-      const processedFill = { ...fill };
-      delete processedFill.boundVariables;
-      delete processedFill.imageRef;
-      if (processedFill.gradientStops) {
-        processedFill.gradientStops = processedFill.gradientStops.map((stop) => {
-          const processedStop = { ...stop };
-          if (processedStop.color) {
-            processedStop.color = rgbaToHex(processedStop.color);
-          }
-          delete processedStop.boundVariables;
-          return processedStop;
-        });
-      }
-      if (processedFill.color) {
-        processedFill.color = rgbaToHex(processedFill.color);
-      }
-      return processedFill;
-    });
-  }
-  if (node.strokes && node.strokes.length > 0) {
-    filtered.strokes = node.strokes.map((stroke) => {
-      const processedStroke = { ...stroke };
-      delete processedStroke.boundVariables;
-      if (processedStroke.color) {
-        processedStroke.color = rgbaToHex(processedStroke.color);
-      }
-      return processedStroke;
-    });
-  }
-  if (node.cornerRadius !== void 0) {
-    filtered.cornerRadius = node.cornerRadius;
-  }
-  if (node.absoluteBoundingBox) {
-    filtered.absoluteBoundingBox = node.absoluteBoundingBox;
-  }
-  if (node.characters) {
-    filtered.characters = node.characters;
-  }
-  if (node.style) {
-    filtered.style = {
-      fontFamily: node.style.fontFamily,
-      fontStyle: node.style.fontStyle,
-      fontWeight: node.style.fontWeight,
-      fontSize: node.style.fontSize,
-      textAlignHorizontal: node.style.textAlignHorizontal,
-      letterSpacing: node.style.letterSpacing,
-      lineHeightPx: node.style.lineHeightPx
-    };
-  }
-  if (node.children) {
-    filtered.children = node.children.map((child) => filterFigmaNode(child)).filter((child) => child !== null);
-  }
-  return filtered;
-}
 server.tool(
   "get_nodes_info",
-  "Get detailed information about multiple nodes in Figma",
+  "Get information about multiple nodes in Figma, compacted for low token cost. Same detail/depth/collapse controls as get_node_info.",
   {
-    nodeIds: z.array(z.string()).describe("Array of node IDs to get information about")
+    nodeIds: z.array(z.string()).describe("Array of node IDs to get information about"),
+    ...shapeParams
   },
-  async ({ nodeIds }) => {
+  async ({ nodeIds, detail, depth, collapseIcons, dedupe: dedupe2 }) => {
     try {
+      const opts = { detail, depth, collapseIcons, dedupe: dedupe2 };
       const results = await Promise.all(
         nodeIds.map(async (nodeId) => {
           const result = await sendCommandToFigma("get_node_info", { nodeId });
@@ -232,7 +341,7 @@ server.tool(
         content: [
           {
             type: "text",
-            text: JSON.stringify(results.map((result) => filterFigmaNode(result.info)))
+            text: JSON.stringify(results.map((result) => shapeNode(result.info, opts)))
           }
         ]
       };

@@ -5,6 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import WebSocket from "ws";
 import { v4 as uuidv4 } from "uuid";
+import { shapeNode, type DetailProfile } from "./shape.js";
 
 // Define TypeScript interfaces for Figma responses
 interface FigmaResponse {
@@ -145,19 +146,58 @@ server.tool(
   }
 );
 
+// Shared shaping params for read tools. Defaults give a compact, "zoomable"
+// view: structure + text + integer boxes, 2 levels deep, icons collapsed.
+// Drill deeper by re-calling with a child nodeId and/or a larger depth.
+const shapeParams = {
+  detail: z
+    .enum(["skeleton", "box", "style", "text", "auto", "full"])
+    .optional()
+    .describe(
+      "Detail profile. skeleton=structure only; box=+integer bounds; text=+characters & font; style=+fills/strokes/gradients; full=everything; auto (default)=structure+text+box. Text characters are always included."
+    ),
+  depth: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe("How many levels of children to expand (default 2). Deeper nodes become stubs with {childCount, more:true} — re-request that id to zoom in."),
+  collapseIcons: z
+    .boolean()
+    .optional()
+    .describe("Collapse icon-like subtrees (no text, vector leaves) to a single ICON node with more:true (default true)."),
+  dedupe: z
+    .boolean()
+    .optional()
+    .describe("Hoist repeated fills/strokes into a shared _defs table referenced by @N strings (default true; only applies when paints are included)."),
+};
+
+type ShapeArgs = {
+  detail?: DetailProfile;
+  depth?: number;
+  collapseIcons?: boolean;
+  dedupe?: boolean;
+};
+
 // Read My Design Tool
 server.tool(
   "read_my_design",
-  "Get detailed information about the current selection in Figma, including all node details",
-  {},
-  async () => {
+  "Get information about the current selection in Figma, compacted for low token cost. Same detail/depth/collapse controls as get_node_info.",
+  {
+    ...shapeParams,
+  },
+  async ({ detail, depth, collapseIcons, dedupe }: any) => {
     try {
+      const opts: ShapeArgs = { detail, depth, collapseIcons, dedupe };
       const result = await sendCommandToFigma("read_my_design", {});
+      const shaped = Array.isArray(result)
+        ? result.map((r: any) => (r && r.document ? { ...r, document: shapeNode(r.document, opts) } : r))
+        : result;
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify(result)
+            text: JSON.stringify(shaped)
           }
         ]
       };
@@ -178,18 +218,19 @@ server.tool(
 // Node Info Tool
 server.tool(
   "get_node_info",
-  "Get detailed information about a specific node in Figma",
+  "Get information about a specific node in Figma, compacted for low token cost. Returns a structure+text view by default; widen with detail/depth to zoom in.",
   {
     nodeId: z.string().describe("The ID of the node to get information about"),
+    ...shapeParams,
   },
-  async ({ nodeId }: any) => {
+  async ({ nodeId, detail, depth, collapseIcons, dedupe }: any) => {
     try {
       const result = await sendCommandToFigma("get_node_info", { nodeId });
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify(filterFigmaNode(result))
+            text: JSON.stringify(shapeNode(result, { detail, depth, collapseIcons, dedupe }))
           }
         ]
       };
@@ -313,12 +354,14 @@ function filterFigmaNode(node: any) {
 // Nodes Info Tool
 server.tool(
   "get_nodes_info",
-  "Get detailed information about multiple nodes in Figma",
+  "Get information about multiple nodes in Figma, compacted for low token cost. Same detail/depth/collapse controls as get_node_info.",
   {
-    nodeIds: z.array(z.string()).describe("Array of node IDs to get information about")
+    nodeIds: z.array(z.string()).describe("Array of node IDs to get information about"),
+    ...shapeParams,
   },
-  async ({ nodeIds }: any) => {
+  async ({ nodeIds, detail, depth, collapseIcons, dedupe }: any) => {
     try {
+      const opts: ShapeArgs = { detail, depth, collapseIcons, dedupe };
       const results = await Promise.all(
         nodeIds.map(async (nodeId: any) => {
           const result = await sendCommandToFigma('get_node_info', { nodeId });
@@ -329,7 +372,7 @@ server.tool(
         content: [
           {
             type: "text",
-            text: JSON.stringify(results.map((result) => filterFigmaNode(result.info)))
+            text: JSON.stringify(results.map((result) => shapeNode(result.info, opts)))
           }
         ]
       };
