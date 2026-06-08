@@ -501,7 +501,6 @@
       <div class="badge-actions">
         <button id="badge-conn" class="icon-btn" title="Reconnect">&#x21bb;</button>
         <button id="badge-expand" class="icon-btn" title="Expand">&#x2197;</button>
-        <button id="badge-close" class="icon-btn" title="Close">&#x2715;</button>
       </div>
     </div>
 
@@ -1157,14 +1156,6 @@
       document
         .getElementById("badge-expand")
         .addEventListener("click", () => setCompact(false));
-      document
-        .getElementById("badge-close")
-        .addEventListener("click", () => {
-          parent.postMessage(
-            { pluginMessage: { type: "close-plugin" } },
-            "*"
-          );
-        });
       badgeConn.addEventListener("click", () => connectButton.click());
       badgeChannel.addEventListener("click", () => {
         if (state.statusKind !== "connected" || !state.channel) return;
