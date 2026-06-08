@@ -13,7 +13,9 @@ var PROFILES = {
   box: { box: true, style: false, text: false, full: false },
   style: { box: true, style: true, text: false, full: false },
   text: { box: true, style: false, text: true, full: false },
-  auto: { box: true, style: false, text: true, full: false },
+  // auto keeps characters (always emitted) but drops font styling — what
+  // matters by default is structure, text content, and positioning, not type specs.
+  auto: { box: true, style: false, text: false, full: false },
   full: { box: true, style: true, text: true, full: true }
 };
 var VECTOR_LEAF = /* @__PURE__ */ new Set([
@@ -29,6 +31,7 @@ var round = (n, p = 0) => {
   const f = Math.pow(10, p);
   return Math.round(n * f) / f;
 };
+var dim = (n) => Math.abs(n) < 1 ? round(n, 2) : Math.round(n);
 function colorToHex(color) {
   if (typeof color === "string") return color;
   const r = Math.round(color.r * 255);
@@ -89,9 +92,125 @@ function isIcon(node, curDepth) {
 function box(node) {
   const b = node.absoluteBoundingBox;
   if (!b) return void 0;
-  return [round(b.x), round(b.y), round(b.width), round(b.height)];
+  return { x: dim(b.x), y: dim(b.y), w: dim(b.width), h: dim(b.height) };
 }
-function shapeRec(node, opts, f, curDepth) {
+function stackOf(node) {
+  if (node.layoutMode === "HORIZONTAL") return "h";
+  if (node.layoutMode === "VERTICAL") return "v";
+  return null;
+}
+function axisSize(node, parent, self, dim2, px) {
+  if (parent) {
+    const isMain = parent === "h" && dim2 === "w" || parent === "v" && dim2 === "h";
+    const fills = isMain ? node.layoutGrow === 1 : node.layoutAlign === "STRETCH";
+    if (fills) return "FILL";
+  }
+  if (self) {
+    const isMain = self === "h" && dim2 === "w" || self === "v" && dim2 === "h";
+    const mode = isMain ? node.primaryAxisSizingMode : node.counterAxisSizingMode;
+    if (mode === "AUTO") return "HUG";
+  }
+  return px;
+}
+function padOf(node) {
+  const t = dim(node.paddingTop || 0);
+  const r = dim(node.paddingRight || 0);
+  const b = dim(node.paddingBottom || 0);
+  const l = dim(node.paddingLeft || 0);
+  if (!(t || r || b || l)) return void 0;
+  if (t === r && r === b && b === l) return t;
+  const o = {};
+  if (t === b && l === r) {
+    if (t) o.vertical = t;
+    if (l) o.horizontal = l;
+    return o;
+  }
+  if (t) o.top = t;
+  if (r) o.right = r;
+  if (b) o.bottom = b;
+  if (l) o.left = l;
+  return o;
+}
+function layoutSpec(node, out, stack) {
+  if (!stack) return;
+  out.stack = stack === "h" ? "HORIZONTAL" : "VERTICAL";
+  if (node.itemSpacing) out.gap = dim(node.itemSpacing);
+  const pad = padOf(node);
+  if (pad !== void 0) out.pad = pad;
+  if (node.primaryAxisAlignItems) out.alignMain = node.primaryAxisAlignItems;
+  if (node.counterAxisAlignItems) out.alignCross = node.counterAxisAlignItems;
+}
+function planRepeats(root, enabled) {
+  const collapsed = /* @__PURE__ */ new Set();
+  if (!enabled) return collapsed;
+  const seen = /* @__PURE__ */ new Set();
+  const visit = (node, isRoot) => {
+    if (!isRoot && node.type === "INSTANCE" && node.componentId) {
+      if (seen.has(node.componentId)) {
+        collapsed.add(node.id);
+        return;
+      }
+      seen.add(node.componentId);
+    }
+    const kids = node.children;
+    if (kids) for (const c of kids) visit(c, false);
+  };
+  visit(root, true);
+  return collapsed;
+}
+function compactProps(cp) {
+  if (!cp || typeof cp !== "object") return void 0;
+  const o = {};
+  for (const key of Object.keys(cp)) {
+    const name = key.split("#")[0];
+    const v = cp[key];
+    o[name] = v && typeof v === "object" && "value" in v ? v.value : v;
+  }
+  return Object.keys(o).length ? o : void 0;
+}
+function collectText(node, acc, cap) {
+  if (acc.length >= cap) return;
+  if (node.type === "TEXT" && typeof node.characters === "string") acc.push(node.characters);
+  const kids = node.children;
+  if (kids) for (const c of kids) {
+    if (acc.length >= cap) break;
+    collectText(c, acc, cap);
+  }
+}
+function planExpansion(root, opts, repeats) {
+  const expand = /* @__PURE__ */ new Set([root.id]);
+  let count = 1;
+  const queue = [{ node: root, depth: 0 }];
+  while (queue.length) {
+    const { node, depth } = queue.shift();
+    if (opts.collapseIcons && isIcon(node, depth)) continue;
+    if (repeats.has(node.id)) continue;
+    const kids = node.children || [];
+    if (!kids.length) continue;
+    const underCap = depth + 1 <= opts.depth;
+    for (const kid of kids) {
+      count++;
+      if (count <= opts.maxNodes && underCap) {
+        expand.add(kid.id);
+        queue.push({ node: kid, depth: depth + 1 });
+      }
+    }
+  }
+  return expand;
+}
+function stubNode(node, collapseIcons) {
+  const out = { id: node.id, name: node.name, type: node.type };
+  if (collapseIcons && isIcon(node, 1)) out.type = "ICON";
+  const b = box(node);
+  if (b) out.box = b;
+  const n = (node.children || []).length;
+  if (n) {
+    out.childCount = n;
+    out.more = true;
+  }
+  return out;
+}
+function shapeRec(node, opts, f, curDepth, parent, expand, repeats) {
   const out = { id: node.id, name: node.name, type: node.type };
   if (opts.collapseIcons && isIcon(node, curDepth)) {
     out.type = "ICON";
@@ -99,16 +218,32 @@ function shapeRec(node, opts, f, curDepth) {
     out.more = true;
     return out;
   }
+  const isRepeat = repeats.has(node.id);
+  const myStack = stackOf(node);
   if (f.box) {
-    const b = box(node);
-    if (b) out.box = b;
+    const absolute = node.layoutPositioning === "ABSOLUTE";
+    if (parent && !absolute) {
+      const b = node.absoluteBoundingBox;
+      if (b) {
+        const w = axisSize(node, parent, myStack, "w", dim(b.width));
+        const h = axisSize(node, parent, myStack, "h", dim(b.height));
+        out.size = w === h && typeof w === "string" ? w : { w, h };
+      }
+    } else {
+      const b = box(node);
+      if (b) out.box = b;
+    }
   }
+  if (f.box && !isRepeat) layoutSpec(node, out, myStack);
   if (node.cornerRadius !== void 0 && (f.style || f.box)) {
     out.cornerRadius = round(node.cornerRadius, 1);
   }
   if (f.style) {
     if (node.fills && node.fills.length) out.fills = node.fills.map((x) => compactPaint(x, f.full));
-    if (node.strokes && node.strokes.length) out.strokes = node.strokes.map((x) => compactPaint(x, f.full));
+    if (node.strokes && node.strokes.length) {
+      out.strokes = node.strokes.map((x) => compactPaint(x, f.full));
+      if (node.strokeWeight !== void 0) out.strokeWeight = round(node.strokeWeight, 2);
+    }
   }
   if (node.characters !== void 0) out.characters = node.characters;
   if (node.style && (f.text || f.style)) {
@@ -117,8 +252,18 @@ function shapeRec(node, opts, f, curDepth) {
   }
   const kids = node.children || [];
   if (kids.length) {
-    if (curDepth < opts.depth) {
-      out.children = kids.map((c) => shapeRec(c, opts, f, curDepth + 1));
+    if (isRepeat) {
+      const props = compactProps(node.componentProperties);
+      if (props) out.props = props;
+      const texts = [];
+      collectText(node, texts, 6);
+      if (texts.length) out.text = texts.length === 1 ? texts[0] : texts;
+      out.childCount = kids.length;
+      out.more = true;
+    } else if (expand.has(node.id)) {
+      out.children = kids.map(
+        (c) => expand.has(c.id) ? shapeRec(c, opts, f, curDepth + 1, myStack, expand, repeats) : stubNode(c, opts.collapseIcons)
+      );
     } else {
       out.childCount = kids.length;
       out.more = true;
@@ -160,13 +305,17 @@ function dedupe(root) {
 }
 function shapeNode(node, options = {}) {
   const opts = {
-    depth: options.depth ?? 2,
+    maxNodes: options.maxNodes ?? 100,
+    depth: options.depth ?? Infinity,
     detail: options.detail ?? "auto",
     collapseIcons: options.collapseIcons ?? true,
+    collapseRepeats: options.collapseRepeats ?? true,
     dedupe: options.dedupe ?? true
   };
   const fields = PROFILES[opts.detail] ?? PROFILES.auto;
-  const shaped = shapeRec(node, opts, fields, 0);
+  const repeats = planRepeats(node, opts.collapseRepeats);
+  const expand = planExpansion(node, opts, repeats);
+  const shaped = shapeRec(node, opts, fields, 0, null, expand, repeats);
   if (opts.dedupe && fields.style) {
     const defs = dedupe(shaped);
     if (defs) shaped._defs = defs;
@@ -256,8 +405,10 @@ var shapeParams = {
   detail: z.enum(["skeleton", "box", "style", "text", "auto", "full"]).optional().describe(
     "Detail profile. skeleton=structure only; box=+integer bounds; text=+characters & font; style=+fills/strokes/gradients; full=everything; auto (default)=structure+text+box. Text characters are always included."
   ),
-  depth: z.number().int().min(0).optional().describe("How many levels of children to expand (default 2). Deeper nodes become stubs with {childCount, more:true} \u2014 re-request that id to zoom in."),
+  maxNodes: z.number().int().min(1).optional().describe("Soft node budget (default 100). The tree expands breadth-first until ~this many nodes are emitted; the rest become stubs with {childCount, more:true}. Raise to see more at once, lower for a terser overview."),
+  depth: z.number().int().min(0).optional().describe("Optional hard cap on levels of children (default: unbounded \u2014 the node budget governs). Stubbed nodes carry {childCount, more:true}; re-request that id to zoom in."),
   collapseIcons: z.boolean().optional().describe("Collapse icon-like subtrees (no text, vector leaves) to a single ICON node with more:true (default true)."),
+  collapseRepeats: z.boolean().optional().describe("Collapse repeated instances of the same component: the first renders in full, later copies become a stub with their props/text and more:true (default true)."),
   dedupe: z.boolean().optional().describe("Hoist repeated fills/strokes into a shared _defs table referenced by @N strings (default true; only applies when paints are included).")
 };
 server.tool(
@@ -266,9 +417,9 @@ server.tool(
   {
     ...shapeParams
   },
-  async ({ detail, depth, collapseIcons, dedupe: dedupe2 }) => {
+  async ({ detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe: dedupe2 }) => {
     try {
-      const opts = { detail, depth, collapseIcons, dedupe: dedupe2 };
+      const opts = { detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe: dedupe2 };
       const result = await sendCommandToFigma("read_my_design", {});
       const shaped = Array.isArray(result) ? result.map((r) => r && r.document ? { ...r, document: shapeNode(r.document, opts) } : r) : result;
       return {
@@ -298,14 +449,14 @@ server.tool(
     nodeId: z.string().describe("The ID of the node to get information about"),
     ...shapeParams
   },
-  async ({ nodeId, detail, depth, collapseIcons, dedupe: dedupe2 }) => {
+  async ({ nodeId, detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe: dedupe2 }) => {
     try {
       const result = await sendCommandToFigma("get_node_info", { nodeId });
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify(shapeNode(result, { detail, depth, collapseIcons, dedupe: dedupe2 }))
+            text: JSON.stringify(shapeNode(result, { detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe: dedupe2 }))
           }
         ]
       };
@@ -328,9 +479,9 @@ server.tool(
     nodeIds: z.array(z.string()).describe("Array of node IDs to get information about"),
     ...shapeParams
   },
-  async ({ nodeIds, detail, depth, collapseIcons, dedupe: dedupe2 }) => {
+  async ({ nodeIds, detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe: dedupe2 }) => {
     try {
-      const opts = { detail, depth, collapseIcons, dedupe: dedupe2 };
+      const opts = { detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe: dedupe2 };
       const results = await Promise.all(
         nodeIds.map(async (nodeId) => {
           const result = await sendCommandToFigma("get_node_info", { nodeId });
