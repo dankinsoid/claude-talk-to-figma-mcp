@@ -149,22 +149,53 @@ function stackOf(node: any): Stack {
   return null;
 }
 
-/** Which axes a child fills inside an auto-layout parent. */
-function childFill(node: any, parent: Stack): { w: boolean; h: boolean } {
-  const grow = node.layoutGrow === 1; // fills the parent's main axis
-  const stretch = node.layoutAlign === "STRETCH"; // fills the counter axis
-  return parent === "h" ? { w: grow, h: stretch } : { w: stretch, h: grow };
+const ALIGN: Record<string, string> = {
+  CENTER: "center",
+  MAX: "end",
+  SPACE_BETWEEN: "between",
+  BASELINE: "baseline",
+};
+
+/**
+ * Resolve one axis of a node's size to "fill" (grows in parent), "hug" (sized
+ * to own content), or a fixed px number. fill wins over hug.
+ */
+function axisSize(node: any, parent: Stack, self: Stack, dim: "w" | "h", px: number): number | string {
+  if (parent) {
+    const isMain = (parent === "h" && dim === "w") || (parent === "v" && dim === "h");
+    const fills = isMain ? node.layoutGrow === 1 : node.layoutAlign === "STRETCH";
+    if (fills) return "fill";
+  }
+  if (self) {
+    const isMain = (self === "h" && dim === "w") || (self === "v" && dim === "h");
+    const mode = isMain ? node.primaryAxisSizingMode : node.counterAxisSizingMode;
+    if (mode === "AUTO") return "hug";
+  }
+  return px;
 }
 
-/** Emit auto-layout container spec: stack/gap/padding (positions, not coords). */
+/** Collapse padding: single value, or {v,h} for symmetric pairs, else [t,r,b,l]. */
+function padOf(node: any): number | number[] | { v: number; h: number } | undefined {
+  const t = round(node.paddingTop || 0);
+  const r = round(node.paddingRight || 0);
+  const b = round(node.paddingBottom || 0);
+  const l = round(node.paddingLeft || 0);
+  if (!(t || r || b || l)) return undefined;
+  if (t === r && r === b && b === l) return t;
+  if (t === b && l === r) return { v: t, h: l };
+  return [t, r, b, l];
+}
+
+/** Emit auto-layout container spec: stack/gap/padding/align (positions, not coords). */
 function layoutSpec(node: any, out: any, stack: Stack): void {
   if (!stack) return;
   out.stack = stack;
   if (node.itemSpacing) out.gap = round(node.itemSpacing);
-  const pads = [node.paddingTop || 0, node.paddingRight || 0, node.paddingBottom || 0, node.paddingLeft || 0];
-  if (pads.some((p) => p)) out.pad = pads.every((p) => p === pads[0]) ? round(pads[0]) : pads.map((p) => round(p));
-  if (node.primaryAxisAlignItems) out.alignMain = node.primaryAxisAlignItems;
-  if (node.counterAxisAlignItems) out.alignCross = node.counterAxisAlignItems;
+  const pad = padOf(node);
+  if (pad !== undefined) out.pad = pad;
+  // Plugin only forwards non-default (non-MIN) alignment, so presence => meaningful.
+  if (node.primaryAxisAlignItems) out.alignMain = ALIGN[node.primaryAxisAlignItems] ?? node.primaryAxisAlignItems;
+  if (node.counterAxisAlignItems) out.alignCross = ALIGN[node.counterAxisAlignItems] ?? node.counterAxisAlignItems;
 }
 
 function shapeRec(node: any, opts: Required<ShapeOptions>, f: Fields, curDepth: number, parent: Stack): any {
@@ -186,10 +217,10 @@ function shapeRec(node: any, opts: Required<ShapeOptions>, f: Fields, curDepth: 
     if (parent && !absolute) {
       const b = node.absoluteBoundingBox;
       if (b) {
-        const fill = childFill(node, parent);
-        const w = fill.w ? "fill" : round(b.width);
-        const h = fill.h ? "fill" : round(b.height);
-        out.size = w === "fill" && h === "fill" ? "fill" : [w, h];
+        const w = axisSize(node, parent, myStack, "w", round(b.width));
+        const h = axisSize(node, parent, myStack, "h", round(b.height));
+        // Collapse when both axes share the same non-numeric mode (fill/hug).
+        out.size = w === h && typeof w === "string" ? w : [w, h];
       }
     } else {
       const b = box(node);

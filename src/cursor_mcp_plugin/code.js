@@ -414,6 +414,10 @@ function filterFigmaNode(node) {
       filtered.primaryAxisAlignItems = node.primaryAxisAlignItems;
     if (node.counterAxisAlignItems && node.counterAxisAlignItems !== "MIN")
       filtered.counterAxisAlignItems = node.counterAxisAlignItems;
+    // Sizing modes (AUTO = hug contents) let the server show "hug" instead of a
+    // px size that just duplicates the children's extent. Consumed, not echoed.
+    if (node.primaryAxisSizingMode) filtered.primaryAxisSizingMode = node.primaryAxisSizingMode;
+    if (node.counterAxisSizingMode) filtered.counterAxisSizingMode = node.counterAxisSizingMode;
   }
   // How this node sizes/positions itself inside an auto-layout parent.
   if (node.layoutAlign && node.layoutAlign !== "INHERIT") filtered.layoutAlign = node.layoutAlign;
