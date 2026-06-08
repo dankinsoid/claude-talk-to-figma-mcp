@@ -400,6 +400,27 @@ function filterFigmaNode(node) {
     };
   }
 
+  // Auto-layout spec: forward so the server can present positioning semantics
+  // (stack/gap/padding + fill/hug sizing) instead of raw coordinates. Only
+  // emit what's present and non-default to keep the payload lean.
+  if (node.layoutMode && node.layoutMode !== "NONE") {
+    filtered.layoutMode = node.layoutMode;
+    if (node.itemSpacing) filtered.itemSpacing = node.itemSpacing;
+    if (node.layoutWrap && node.layoutWrap !== "NO_WRAP") filtered.layoutWrap = node.layoutWrap;
+    ["paddingTop", "paddingRight", "paddingBottom", "paddingLeft"].forEach((k) => {
+      if (node[k]) filtered[k] = node[k];
+    });
+    if (node.primaryAxisAlignItems && node.primaryAxisAlignItems !== "MIN")
+      filtered.primaryAxisAlignItems = node.primaryAxisAlignItems;
+    if (node.counterAxisAlignItems && node.counterAxisAlignItems !== "MIN")
+      filtered.counterAxisAlignItems = node.counterAxisAlignItems;
+  }
+  // How this node sizes/positions itself inside an auto-layout parent.
+  if (node.layoutAlign && node.layoutAlign !== "INHERIT") filtered.layoutAlign = node.layoutAlign;
+  if (node.layoutGrow) filtered.layoutGrow = node.layoutGrow;
+  if (node.layoutPositioning && node.layoutPositioning !== "AUTO")
+    filtered.layoutPositioning = node.layoutPositioning;
+
   if (node.children) {
     filtered.children = node.children
       .map((child) => {

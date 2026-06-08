@@ -37,7 +37,9 @@ const PROFILES: Record<DetailProfile, Fields> = {
   box: { box: true, style: false, text: false, full: false },
   style: { box: true, style: true, text: false, full: false },
   text: { box: true, style: false, text: true, full: false },
-  auto: { box: true, style: false, text: true, full: false },
+  // auto keeps characters (always emitted) but drops font styling — what
+  // matters by default is structure, text content, and positioning, not type specs.
+  auto: { box: true, style: false, text: false, full: false },
   full: { box: true, style: true, text: true, full: true },
 };
 
@@ -138,7 +140,34 @@ function box(node: any): number[] | undefined {
   return [round(b.x), round(b.y), round(b.width), round(b.height)];
 }
 
-function shapeRec(node: any, opts: Required<ShapeOptions>, f: Fields, curDepth: number): any {
+type Stack = "h" | "v" | null;
+
+/** This node's own auto-layout direction, if any. */
+function stackOf(node: any): Stack {
+  if (node.layoutMode === "HORIZONTAL") return "h";
+  if (node.layoutMode === "VERTICAL") return "v";
+  return null;
+}
+
+/** Which axes a child fills inside an auto-layout parent. */
+function childFill(node: any, parent: Stack): { w: boolean; h: boolean } {
+  const grow = node.layoutGrow === 1; // fills the parent's main axis
+  const stretch = node.layoutAlign === "STRETCH"; // fills the counter axis
+  return parent === "h" ? { w: grow, h: stretch } : { w: stretch, h: grow };
+}
+
+/** Emit auto-layout container spec: stack/gap/padding (positions, not coords). */
+function layoutSpec(node: any, out: any, stack: Stack): void {
+  if (!stack) return;
+  out.stack = stack;
+  if (node.itemSpacing) out.gap = round(node.itemSpacing);
+  const pads = [node.paddingTop || 0, node.paddingRight || 0, node.paddingBottom || 0, node.paddingLeft || 0];
+  if (pads.some((p) => p)) out.pad = pads.every((p) => p === pads[0]) ? round(pads[0]) : pads.map((p) => round(p));
+  if (node.primaryAxisAlignItems) out.alignMain = node.primaryAxisAlignItems;
+  if (node.counterAxisAlignItems) out.alignCross = node.counterAxisAlignItems;
+}
+
+function shapeRec(node: any, opts: Required<ShapeOptions>, f: Fields, curDepth: number, parent: Stack): any {
   const out: any = { id: node.id, name: node.name, type: node.type };
 
   if (opts.collapseIcons && isIcon(node, curDepth)) {
@@ -148,10 +177,26 @@ function shapeRec(node: any, opts: Required<ShapeOptions>, f: Fields, curDepth: 
     return out;
   }
 
+  const myStack = stackOf(node);
+  // Geometry: inside an auto-layout parent a child's x/y are layout-determined,
+  // so we drop them and express only sizing (fill vs fixed px). Absolutely-
+  // positioned children and nodes under a non-layout parent keep the full box.
   if (f.box) {
-    const b = box(node);
-    if (b) out.box = b;
+    const absolute = node.layoutPositioning === "ABSOLUTE";
+    if (parent && !absolute) {
+      const b = node.absoluteBoundingBox;
+      if (b) {
+        const fill = childFill(node, parent);
+        const w = fill.w ? "fill" : round(b.width);
+        const h = fill.h ? "fill" : round(b.height);
+        out.size = w === "fill" && h === "fill" ? "fill" : [w, h];
+      }
+    } else {
+      const b = box(node);
+      if (b) out.box = b;
+    }
   }
+  if (f.box) layoutSpec(node, out, myStack);
   if (node.cornerRadius !== undefined && (f.style || f.box)) {
     out.cornerRadius = round(node.cornerRadius, 1);
   }
@@ -169,7 +214,7 @@ function shapeRec(node: any, opts: Required<ShapeOptions>, f: Fields, curDepth: 
   const kids: any[] = node.children || [];
   if (kids.length) {
     if (curDepth < opts.depth) {
-      out.children = kids.map((c) => shapeRec(c, opts, f, curDepth + 1));
+      out.children = kids.map((c) => shapeRec(c, opts, f, curDepth + 1, myStack));
     } else {
       out.childCount = kids.length;
       out.more = true; // drill in with get_node_info(id, depth>0)
@@ -227,7 +272,7 @@ export function shapeNode(node: any, options: ShapeOptions = {}): any {
     dedupe: options.dedupe ?? true,
   };
   const fields = PROFILES[opts.detail] ?? PROFILES.auto;
-  const shaped = shapeRec(node, opts, fields, 0);
+  const shaped = shapeRec(node, opts, fields, 0, null);
   if (opts.dedupe && fields.style) {
     const defs = dedupe(shaped);
     if (defs) shaped._defs = defs;
