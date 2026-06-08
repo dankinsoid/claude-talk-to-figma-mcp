@@ -23,7 +23,13 @@ interface Fields {
 export type DetailProfile = "skeleton" | "box" | "style" | "text" | "auto" | "full";
 
 export interface ShapeOptions {
-  /** Levels of children to expand. Beyond it, nodes become drill-in stubs. */
+  /**
+   * Soft node budget: the tree expands breadth-first until ~this many nodes are
+   * emitted, then the rest become drill-in stubs. Keeps response size roughly
+   * constant regardless of tree shape. Default 60.
+   */
+  maxNodes?: number;
+  /** Optional hard depth cap (levels of children). Default: unbounded (budget governs). */
   depth?: number;
   detail?: DetailProfile;
   /** Collapse icon-like subtrees (no text, vector leaves) to one ICON node. */
@@ -203,7 +209,56 @@ function layoutSpec(node: any, out: any, stack: Stack): void {
   if (node.counterAxisAlignItems) out.alignCross = ALIGN[node.counterAxisAlignItems] ?? node.counterAxisAlignItems;
 }
 
-function shapeRec(node: any, opts: Required<ShapeOptions>, f: Fields, curDepth: number, parent: Stack): any {
+/**
+ * Breadth-first expansion plan. Walks the tree level by level admitting nodes
+ * until the budget runs out; nodes beyond it are recorded as stubs. Returns the
+ * set of node ids whose children should be expanded inline. Icons and depth-cap
+ * boundaries are not expanded. This decouples "how much to show" from the
+ * render pass so size stays predictable across wide and deep trees alike.
+ */
+function planExpansion(root: any, opts: Required<ShapeOptions>): Set<string> {
+  const expand = new Set<string>([root.id]);
+  let count = 1; // root always shown
+  const queue: { node: any; depth: number }[] = [{ node: root, depth: 0 }];
+  while (queue.length) {
+    const { node, depth } = queue.shift()!;
+    if (opts.collapseIcons && isIcon(node, depth)) continue; // icon: children hidden
+    const kids: any[] = node.children || [];
+    if (!kids.length) continue;
+    const underCap = depth + 1 <= opts.depth;
+    for (const kid of kids) {
+      count++; // kid appears (full or stub)
+      if (count <= opts.maxNodes && underCap) {
+        expand.add(kid.id);
+        queue.push({ node: kid, depth: depth + 1 });
+      }
+      // else: kid stays a stub — not added to expand, not enqueued
+    }
+  }
+  return expand;
+}
+
+/** Minimal stub for a truncated node: identity + extent + a drill-in marker. */
+function stubNode(node: any): any {
+  const out: any = { id: node.id, name: node.name, type: node.type };
+  const b = box(node);
+  if (b) out.box = b; // px extent/position so the agent isn't blind (e.g. hug nodes)
+  const n = (node.children || []).length;
+  if (n) {
+    out.childCount = n; // truncation marker: N hidden children
+    out.more = true; // re-request this id to expand
+  }
+  return out;
+}
+
+function shapeRec(
+  node: any,
+  opts: Required<ShapeOptions>,
+  f: Fields,
+  curDepth: number,
+  parent: Stack,
+  expand: Set<string>
+): any {
   const out: any = { id: node.id, name: node.name, type: node.type };
 
   if (opts.collapseIcons && isIcon(node, curDepth)) {
@@ -249,11 +304,14 @@ function shapeRec(node: any, opts: Required<ShapeOptions>, f: Fields, curDepth: 
 
   const kids: any[] = node.children || [];
   if (kids.length) {
-    if (curDepth < opts.depth) {
-      out.children = kids.map((c) => shapeRec(c, opts, f, curDepth + 1, myStack));
+    if (expand.has(node.id)) {
+      out.children = kids.map((c) =>
+        expand.has(c.id) ? shapeRec(c, opts, f, curDepth + 1, myStack, expand) : stubNode(c)
+      );
     } else {
+      // Node itself reached the budget edge — surface as a stub in place.
       out.childCount = kids.length;
-      out.more = true; // drill in with get_node_info(id, depth>0)
+      out.more = true;
     }
   }
   return out;
@@ -302,13 +360,15 @@ function dedupe(root: any): Record<string, any> | undefined {
  */
 export function shapeNode(node: any, options: ShapeOptions = {}): any {
   const opts: Required<ShapeOptions> = {
-    depth: options.depth ?? 2,
+    maxNodes: options.maxNodes ?? 60,
+    depth: options.depth ?? Infinity,
     detail: options.detail ?? "auto",
     collapseIcons: options.collapseIcons ?? true,
     dedupe: options.dedupe ?? true,
   };
   const fields = PROFILES[opts.detail] ?? PROFILES.auto;
-  const shaped = shapeRec(node, opts, fields, 0, null);
+  const expand = planExpansion(node, opts);
+  const shaped = shapeRec(node, opts, fields, 0, null, expand);
   if (opts.dedupe && fields.style) {
     const defs = dedupe(shaped);
     if (defs) shaped._defs = defs;

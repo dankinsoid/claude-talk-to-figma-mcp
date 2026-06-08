@@ -156,12 +156,18 @@ const shapeParams = {
     .describe(
       "Detail profile. skeleton=structure only; box=+integer bounds; text=+characters & font; style=+fills/strokes/gradients; full=everything; auto (default)=structure+text+box. Text characters are always included."
     ),
+  maxNodes: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe("Soft node budget (default 60). The tree expands breadth-first until ~this many nodes are emitted; the rest become stubs with {childCount, more:true}. Raise to see more at once, lower for a terser overview."),
   depth: z
     .number()
     .int()
     .min(0)
     .optional()
-    .describe("How many levels of children to expand (default 2). Deeper nodes become stubs with {childCount, more:true} — re-request that id to zoom in."),
+    .describe("Optional hard cap on levels of children (default: unbounded — the node budget governs). Stubbed nodes carry {childCount, more:true}; re-request that id to zoom in."),
   collapseIcons: z
     .boolean()
     .optional()
@@ -174,6 +180,7 @@ const shapeParams = {
 
 type ShapeArgs = {
   detail?: DetailProfile;
+  maxNodes?: number;
   depth?: number;
   collapseIcons?: boolean;
   dedupe?: boolean;
@@ -186,9 +193,9 @@ server.tool(
   {
     ...shapeParams,
   },
-  async ({ detail, depth, collapseIcons, dedupe }: any) => {
+  async ({ detail, maxNodes, depth, collapseIcons, dedupe }: any) => {
     try {
-      const opts: ShapeArgs = { detail, depth, collapseIcons, dedupe };
+      const opts: ShapeArgs = { detail, maxNodes, depth, collapseIcons, dedupe };
       const result = await sendCommandToFigma("read_my_design", {});
       const shaped = Array.isArray(result)
         ? result.map((r: any) => (r && r.document ? { ...r, document: shapeNode(r.document, opts) } : r))
@@ -223,14 +230,14 @@ server.tool(
     nodeId: z.string().describe("The ID of the node to get information about"),
     ...shapeParams,
   },
-  async ({ nodeId, detail, depth, collapseIcons, dedupe }: any) => {
+  async ({ nodeId, detail, maxNodes, depth, collapseIcons, dedupe }: any) => {
     try {
       const result = await sendCommandToFigma("get_node_info", { nodeId });
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify(shapeNode(result, { detail, depth, collapseIcons, dedupe }))
+            text: JSON.stringify(shapeNode(result, { detail, maxNodes, depth, collapseIcons, dedupe }))
           }
         ]
       };
@@ -359,9 +366,9 @@ server.tool(
     nodeIds: z.array(z.string()).describe("Array of node IDs to get information about"),
     ...shapeParams,
   },
-  async ({ nodeIds, detail, depth, collapseIcons, dedupe }: any) => {
+  async ({ nodeIds, detail, maxNodes, depth, collapseIcons, dedupe }: any) => {
     try {
-      const opts: ShapeArgs = { detail, depth, collapseIcons, dedupe };
+      const opts: ShapeArgs = { detail, maxNodes, depth, collapseIcons, dedupe };
       const results = await Promise.all(
         nodeIds.map(async (nodeId: any) => {
           const result = await sendCommandToFigma('get_node_info', { nodeId });
