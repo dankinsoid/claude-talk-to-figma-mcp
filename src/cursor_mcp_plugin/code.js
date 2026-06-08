@@ -94,10 +94,22 @@ figma.ui.onmessage = async (msg) => {
         Math.max(1, Math.round(msg.height))
       );
       break;
-    case "reposition-window":
-      // Figma clamps coords inside the viewport, so a large y snaps to bottom.
-      figma.ui.reposition(Math.round(msg.x), Math.round(msg.y));
+    case "pin-window": {
+      // reposition places the window CENTER relative to the viewport center, so
+      // we compute where the center must sit for the window to hug a corner.
+      // Viewport pixel size = canvas bounds * zoom (pixels per canvas unit).
+      const z = figma.viewport.zoom;
+      const vw = figma.viewport.bounds.width * z;
+      const vh = figma.viewport.bounds.height * z;
+      const w = Math.max(1, msg.width);
+      const h = Math.max(1, msg.height);
+      const m = msg.margin || 0;
+      // Negative x = left, positive y = down (corner currently fixed: bottom-left).
+      const x = -(vw / 2 - w / 2 - m);
+      const y = vh / 2 - h / 2 - m;
+      figma.ui.reposition(Math.round(x), Math.round(y));
       break;
+    }
     case "execute-command":
       // Execute commands received from UI (which gets them from WebSocket)
       try {

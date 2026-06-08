@@ -1103,18 +1103,19 @@
         badgeConn.title = state.connected ? "Disconnect" : "Reconnect";
       }
 
-      // Bottom-left pin target. reposition is measured from the viewport
-      // center, and Figma clamps to the viewport — so a large negative x snaps
-      // to the left edge and a large positive y snaps to the bottom edge.
-      const PIN_POS = { x: -100000, y: 100000 };
+      const PIN_MARGIN = 8;
 
-      function repositionPinned() {
+      // Hug the bottom-left corner. The main thread computes the exact center
+      // position from the viewport size and the window size we pass here, so we
+      // must pass the *current* (animating) size to stay anchored as it resizes.
+      function repositionPinned(width, height) {
         parent.postMessage(
           {
             pluginMessage: {
-              type: "reposition-window",
-              x: PIN_POS.x,
-              y: PIN_POS.y,
+              type: "pin-window",
+              width: width,
+              height: height,
+              margin: PIN_MARGIN,
             },
           },
           "*"
@@ -1144,7 +1145,7 @@
             { pluginMessage: { type: "resize-window", width: w, height: h } },
             "*"
           );
-          if (state.pinned) repositionPinned();
+          if (state.pinned) repositionPinned(w, h);
           if (i >= steps) {
             clearInterval(resizeTimer);
             resizeTimer = null;
