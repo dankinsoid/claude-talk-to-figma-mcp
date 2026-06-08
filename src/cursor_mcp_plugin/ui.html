@@ -1103,9 +1103,10 @@
         badgeConn.title = state.connected ? "Disconnect" : "Reconnect";
       }
 
-      // Bottom-left pin target. Figma clamps coords inside the viewport, so a
-      // large y snaps the window flush to the bottom edge.
-      const PIN_POS = { x: 8, y: 100000 };
+      // Bottom-left pin target. reposition is measured from the viewport
+      // center, and Figma clamps to the viewport — so a large negative x snaps
+      // to the left edge and a large positive y snaps to the bottom edge.
+      const PIN_POS = { x: -100000, y: 100000 };
 
       function repositionPinned() {
         parent.postMessage(
