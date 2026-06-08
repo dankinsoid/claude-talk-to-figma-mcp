@@ -65,6 +65,13 @@ const round = (n: number, p = 0): number => {
   return Math.round(n * f) / f;
 };
 
+/**
+ * Geometry rounding: integer for >=1px (a 1px error on a 2000px coord is noise),
+ * but keep sub-pixel precision below 1px so thin features (a 0.5px divider) do
+ * not round away to nothing.
+ */
+const dim = (n: number): number => (Math.abs(n) < 1 ? round(n, 2) : Math.round(n));
+
 function colorToHex(color: any): string {
   if (typeof color === "string") return color; // plugin already converted some
   const r = Math.round(color.r * 255);
@@ -143,7 +150,7 @@ function isIcon(node: any, curDepth: number): boolean {
 function box(node: any): { x: number; y: number; w: number; h: number } | undefined {
   const b = node.absoluteBoundingBox;
   if (!b) return undefined;
-  return { x: round(b.x), y: round(b.y), w: round(b.width), h: round(b.height) };
+  return { x: dim(b.x), y: dim(b.y), w: dim(b.width), h: dim(b.height) };
 }
 
 type Stack = "h" | "v" | null;
@@ -155,27 +162,22 @@ function stackOf(node: any): Stack {
   return null;
 }
 
-const ALIGN: Record<string, string> = {
-  CENTER: "center",
-  MAX: "end",
-  SPACE_BETWEEN: "between",
-  BASELINE: "baseline",
-};
-
 /**
- * Resolve one axis of a node's size to "fill" (grows in parent), "hug" (sized
- * to own content), or a fixed px number. fill wins over hug.
+ * Resolve one axis of a node's size to "FILL" (grows in parent), "HUG" (sized
+ * to own content), or a fixed px number. fill wins over hug. The string values
+ * are the canonical Figma enums (layoutSizingHorizontal/Vertical) so the agent
+ * can pass them straight back to set_layout_sizing — read/write round-trip safe.
  */
 function axisSize(node: any, parent: Stack, self: Stack, dim: "w" | "h", px: number): number | string {
   if (parent) {
     const isMain = (parent === "h" && dim === "w") || (parent === "v" && dim === "h");
     const fills = isMain ? node.layoutGrow === 1 : node.layoutAlign === "STRETCH";
-    if (fills) return "fill";
+    if (fills) return "FILL";
   }
   if (self) {
     const isMain = (self === "h" && dim === "w") || (self === "v" && dim === "h");
     const mode = isMain ? node.primaryAxisSizingMode : node.counterAxisSizingMode;
-    if (mode === "AUTO") return "hug";
+    if (mode === "AUTO") return "HUG";
   }
   return px;
 }
@@ -187,10 +189,10 @@ function axisSize(node: any, parent: Stack, self: Stack, dim: "w" | "h", px: num
  * the agent never has to recall an order.
  */
 function padOf(node: any): number | Record<string, number> | undefined {
-  const t = round(node.paddingTop || 0);
-  const r = round(node.paddingRight || 0);
-  const b = round(node.paddingBottom || 0);
-  const l = round(node.paddingLeft || 0);
+  const t = dim(node.paddingTop || 0);
+  const r = dim(node.paddingRight || 0);
+  const b = dim(node.paddingBottom || 0);
+  const l = dim(node.paddingLeft || 0);
   if (!(t || r || b || l)) return undefined;
   if (t === r && r === b && b === l) return t;
   const o: Record<string, number> = {};
@@ -206,16 +208,21 @@ function padOf(node: any): number | Record<string, number> | undefined {
   return o;
 }
 
-/** Emit auto-layout container spec: stack/gap/padding/align (positions, not coords). */
+/**
+ * Emit auto-layout container spec: stack/gap/padding/align (positions, not
+ * coords). Values are canonical Figma enums (HORIZONTAL/VERTICAL, MIN/CENTER/
+ * MAX/SPACE_BETWEEN/BASELINE) so they round-trip into set_layout_mode /
+ * set_axis_align without translation.
+ */
 function layoutSpec(node: any, out: any, stack: Stack): void {
   if (!stack) return;
-  out.stack = stack;
-  if (node.itemSpacing) out.gap = round(node.itemSpacing);
+  out.stack = stack === "h" ? "HORIZONTAL" : "VERTICAL";
+  if (node.itemSpacing) out.gap = dim(node.itemSpacing);
   const pad = padOf(node);
   if (pad !== undefined) out.pad = pad;
   // Plugin only forwards non-default (non-MIN) alignment, so presence => meaningful.
-  if (node.primaryAxisAlignItems) out.alignMain = ALIGN[node.primaryAxisAlignItems] ?? node.primaryAxisAlignItems;
-  if (node.counterAxisAlignItems) out.alignCross = ALIGN[node.counterAxisAlignItems] ?? node.counterAxisAlignItems;
+  if (node.primaryAxisAlignItems) out.alignMain = node.primaryAxisAlignItems;
+  if (node.counterAxisAlignItems) out.alignCross = node.counterAxisAlignItems;
 }
 
 /**
@@ -289,8 +296,8 @@ function shapeRec(
     if (parent && !absolute) {
       const b = node.absoluteBoundingBox;
       if (b) {
-        const w = axisSize(node, parent, myStack, "w", round(b.width));
-        const h = axisSize(node, parent, myStack, "h", round(b.height));
+        const w = axisSize(node, parent, myStack, "w", dim(b.width));
+        const h = axisSize(node, parent, myStack, "h", dim(b.height));
         // Collapse to a bare "fill"/"hug" when both axes share that mode.
         out.size = w === h && typeof w === "string" ? w : { w, h };
       }
@@ -305,7 +312,12 @@ function shapeRec(
   }
   if (f.style) {
     if (node.fills && node.fills.length) out.fills = node.fills.map((x: any) => compactPaint(x, f.full));
-    if (node.strokes && node.strokes.length) out.strokes = node.strokes.map((x: any) => compactPaint(x, f.full));
+    if (node.strokes && node.strokes.length) {
+      out.strokes = node.strokes.map((x: any) => compactPaint(x, f.full));
+      // Thickness kept at full precision — stroke weights are small and often
+      // sub-pixel, so rounding to int would distort or erase them.
+      if (node.strokeWeight !== undefined) out.strokeWeight = round(node.strokeWeight, 2);
+    }
   }
   // Text characters are the semantic anchor — keep them on every profile.
   if (node.characters !== undefined) out.characters = node.characters;

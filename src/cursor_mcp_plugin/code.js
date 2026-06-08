@@ -380,6 +380,12 @@ function filterFigmaNode(node) {
     filtered.cornerRadius = node.cornerRadius;
   }
 
+  // Stroke thickness — often sub-pixel (e.g. a 0.5px border); without it the
+  // server can show a border exists but not how thick.
+  if (node.strokeWeight !== undefined && node.strokes && node.strokes.length > 0) {
+    filtered.strokeWeight = node.strokeWeight;
+  }
+
   if (node.absoluteBoundingBox) {
     filtered.absoluteBoundingBox = node.absoluteBoundingBox;
   }
