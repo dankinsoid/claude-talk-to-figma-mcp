@@ -514,6 +514,7 @@
         channel: null,
         commandTracking: new Map(),
         compact: false,
+        pinned: false, // once auto-collapsed, keep the window pinned bottom-left
         statusKind: "disconnected", // connected | disconnected | connecting
       };
 
@@ -692,8 +693,9 @@
                     channel: channelName,
                   });
 
-                  // Collapse to the compact badge once we're live.
-                  setCompact(true);
+                  // Collapse to the compact badge once we're live, pinned
+                  // to the bottom-left corner.
+                  setCompact(true, true);
 
                   // Notify the plugin code
                   parent.postMessage(
@@ -1101,8 +1103,28 @@
         badgeConn.title = state.connected ? "Disconnect" : "Reconnect";
       }
 
+      // Bottom-left pin target. Figma clamps coords inside the viewport, so a
+      // large y snaps the window flush to the bottom edge.
+      const PIN_POS = { x: 8, y: 100000 };
+
+      function repositionPinned() {
+        parent.postMessage(
+          {
+            pluginMessage: {
+              type: "reposition-window",
+              x: PIN_POS.x,
+              y: PIN_POS.y,
+            },
+          },
+          "*"
+        );
+      }
+
       // Ask the main thread to resize the window, stepping over ~180ms so the
       // collapse/expand reads as an animation (the iframe can't resize itself).
+      // While pinned, re-pin every frame so the window stays bottom-anchored as
+      // it grows/shrinks (resize keeps the top-left fixed, which would otherwise
+      // push the expanding panel off the bottom of the screen).
       let resizeTimer = null;
       function animateResize(target) {
         if (resizeTimer) clearInterval(resizeTimer);
@@ -1121,6 +1143,7 @@
             { pluginMessage: { type: "resize-window", width: w, height: h } },
             "*"
           );
+          if (state.pinned) repositionPinned();
           if (i >= steps) {
             clearInterval(resizeTimer);
             resizeTimer = null;
@@ -1128,9 +1151,10 @@
         }, 15);
       }
 
-      function setCompact(compact) {
+      function setCompact(compact, pin) {
         if (state.compact === compact) return;
         state.compact = compact;
+        if (pin) state.pinned = true;
         document.body.classList.toggle("compact", compact);
         renderBadge();
         animateResize(compact ? SIZE_COMPACT : SIZE_FULL);

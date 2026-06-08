@@ -94,6 +94,10 @@ figma.ui.onmessage = async (msg) => {
         Math.max(1, Math.round(msg.height))
       );
       break;
+    case "reposition-window":
+      // Figma clamps coords inside the viewport, so a large y snaps to bottom.
+      figma.ui.reposition(Math.round(msg.x), Math.round(msg.y));
+      break;
     case "execute-command":
       // Execute commands received from UI (which gets them from WebSocket)
       try {
