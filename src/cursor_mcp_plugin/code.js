@@ -87,6 +87,13 @@ figma.ui.onmessage = async (msg) => {
     case "close-plugin":
       figma.closePlugin();
       break;
+    case "resize-window":
+      // UI can't resize itself; it requests a resize from the main thread.
+      figma.ui.resize(
+        Math.max(1, Math.round(msg.width)),
+        Math.max(1, Math.round(msg.height))
+      );
+      break;
     case "execute-command":
       // Execute commands received from UI (which gets them from WebSocket)
       try {

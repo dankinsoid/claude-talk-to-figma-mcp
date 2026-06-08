@@ -250,6 +250,110 @@
       .operation-error {
         color: #ff9999;
       }
+
+      .header {
+        justify-content: space-between;
+      }
+
+      .header-controls {
+        display: flex;
+        gap: 6px;
+      }
+
+      /* Small square icon button, reused in header and compact badge */
+      .icon-btn {
+        background: transparent;
+        border: none;
+        color: #999999;
+        padding: 0;
+        margin: 0;
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+        font-size: 14px;
+        line-height: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: background-color 0.15s, color 0.15s;
+      }
+
+      .icon-btn:hover {
+        background-color: rgba(255, 255, 255, 0.12);
+        color: #ffffff;
+      }
+
+      /* Compact badge: a single status pill replacing the whole UI */
+      body.compact {
+        padding: 0;
+      }
+
+      body.compact .container {
+        display: none;
+      }
+
+      .compact-badge {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 100vh;
+        box-sizing: border-box;
+        padding: 0 6px 0 12px;
+        font-size: 13px;
+        font-weight: 600;
+        color: #ffffff;
+      }
+
+      .compact-badge.connected {
+        background-color: #1a472a;
+      }
+      .compact-badge.disconnected {
+        background-color: #471a1a;
+      }
+      .compact-badge.connecting {
+        background-color: #1a3147;
+      }
+
+      .badge-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex: 0 0 auto;
+      }
+      .compact-badge.connected .badge-dot {
+        background-color: #4ade80;
+      }
+      .compact-badge.disconnected .badge-dot {
+        background-color: #ff9999;
+      }
+      .compact-badge.connecting .badge-dot {
+        background-color: #66b3ff;
+      }
+
+      .badge-channel {
+        flex: 1 1 auto;
+        font-family: monospace;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        cursor: pointer;
+      }
+      .badge-channel:hover {
+        text-decoration: underline;
+      }
+
+      .badge-actions {
+        display: flex;
+        gap: 2px;
+        flex: 0 0 auto;
+      }
+      .compact-badge .icon-btn {
+        color: rgba(255, 255, 255, 0.7);
+      }
+      .compact-badge .icon-btn:hover {
+        color: #ffffff;
+      }
     </style>
   </head>
 
@@ -259,6 +363,11 @@
         <div class="header-text">
           <h1>Talk To Figma MCP Plugin</h1>
           <p>Connect Figma to Cursor AI using MCP</p>
+        </div>
+        <div class="header-controls">
+          <button id="btn-compact" class="icon-btn" title="Compact mode">
+            &#x2013;
+          </button>
         </div>
       </div>
 
@@ -380,6 +489,18 @@
       </div>
     </div>
 
+    <div id="compact-badge" class="compact-badge disconnected hidden">
+      <span class="badge-dot"></span>
+      <span id="badge-channel" class="badge-channel" title="Click to copy channel"
+        >Not connected</span
+      >
+      <div class="badge-actions">
+        <button id="badge-conn" class="icon-btn" title="Reconnect">&#x21bb;</button>
+        <button id="badge-expand" class="icon-btn" title="Expand">&#x2197;</button>
+        <button id="badge-close" class="icon-btn" title="Close">&#x2715;</button>
+      </div>
+    </div>
+
     <script>
       // WebSocket connection state
       const state = {
@@ -389,7 +510,12 @@
         pendingRequests: new Map(),
         channel: null,
         commandTracking: new Map(),
+        compact: false,
+        statusKind: "disconnected", // connected | disconnected | connecting
       };
+
+      const SIZE_FULL = { w: 350, h: 600 };
+      const SIZE_COMPACT = { w: 240, h: 40 };
 
       // --- Anonymous analytics (GA4 Measurement Protocol) ---
       const analytics = (() => {
@@ -482,6 +608,8 @@
       // Initialize UI
       function updateConnectionStatus(isConnected, message) {
         state.connected = isConnected;
+        state.statusKind = isConnected ? "connected" : "disconnected";
+        renderBadge();
 
         let statusMessage =
           message ||
@@ -560,6 +688,9 @@
                     port: state.serverPort,
                     channel: channelName,
                   });
+
+                  // Collapse to the compact badge once we're live.
+                  setCompact(true);
 
                   // Notify the plugin code
                   parent.postMessage(
@@ -795,6 +926,8 @@
           const port = parseInt(portInput.value, 10) || 3055;
           updateConnectionStatus(false, "Connecting...");
           connectionStatus.className = "status info";
+          state.statusKind = "connecting";
+          renderBadge();
           connectToServer(port);
         }
       });
@@ -936,6 +1069,108 @@
           2
         );
       }
+
+      // --- Compact badge ---
+      // @ai-generated(guided)
+      const compactBadge = document.getElementById("compact-badge");
+      const badgeChannel = document.getElementById("badge-channel");
+      const badgeConn = document.getElementById("badge-conn");
+
+      // Reflect connection status (color + channel + action) onto the badge.
+      function renderBadge() {
+        compactBadge.className = `compact-badge ${state.statusKind}${
+          state.compact ? "" : " hidden"
+        }`;
+
+        if (state.statusKind === "connected" && state.channel) {
+          badgeChannel.textContent = state.channel;
+          badgeChannel.title = "Click to copy channel";
+          badgeChannel.style.pointerEvents = "auto";
+        } else {
+          badgeChannel.textContent =
+            state.statusKind === "connecting" ? "Connecting…" : "Disconnected";
+          badgeChannel.title = "";
+          badgeChannel.style.pointerEvents = "none";
+        }
+
+        // Connected → disconnect (power), otherwise → (re)connect (refresh).
+        badgeConn.innerHTML = state.connected ? "⏻" : "↻";
+        badgeConn.title = state.connected ? "Disconnect" : "Reconnect";
+      }
+
+      // Ask the main thread to resize the window, stepping over ~180ms so the
+      // collapse/expand reads as an animation (the iframe can't resize itself).
+      let resizeTimer = null;
+      function animateResize(target) {
+        if (resizeTimer) clearInterval(resizeTimer);
+        const startW = window.innerWidth;
+        const startH = window.innerHeight;
+        const steps = 12;
+        let i = 0;
+        resizeTimer = setInterval(() => {
+          i++;
+          const t = i / steps;
+          // ease-out cubic
+          const e = 1 - Math.pow(1 - t, 3);
+          const w = Math.round(startW + (target.w - startW) * e);
+          const h = Math.round(startH + (target.h - startH) * e);
+          parent.postMessage(
+            { pluginMessage: { type: "resize-window", width: w, height: h } },
+            "*"
+          );
+          if (i >= steps) {
+            clearInterval(resizeTimer);
+            resizeTimer = null;
+          }
+        }, 15);
+      }
+
+      function setCompact(compact) {
+        if (state.compact === compact) return;
+        state.compact = compact;
+        document.body.classList.toggle("compact", compact);
+        renderBadge();
+        animateResize(compact ? SIZE_COMPACT : SIZE_FULL);
+      }
+
+      // Copy text in the sandboxed iframe (clipboard API is unavailable here).
+      function copyText(text) {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+          document.execCommand("copy");
+        } catch (e) {}
+        document.body.removeChild(ta);
+      }
+
+      document
+        .getElementById("btn-compact")
+        .addEventListener("click", () => setCompact(true));
+      document
+        .getElementById("badge-expand")
+        .addEventListener("click", () => setCompact(false));
+      document
+        .getElementById("badge-close")
+        .addEventListener("click", () => {
+          parent.postMessage(
+            { pluginMessage: { type: "close-plugin" } },
+            "*"
+          );
+        });
+      badgeConn.addEventListener("click", () => connectButton.click());
+      badgeChannel.addEventListener("click", () => {
+        if (state.statusKind !== "connected" || !state.channel) return;
+        copyText(state.channel);
+        const prev = badgeChannel.textContent;
+        badgeChannel.textContent = "Copied!";
+        setTimeout(() => {
+          if (state.statusKind === "connected") badgeChannel.textContent = prev;
+        }, 1200);
+      });
     </script>
   </body>
 </html>
