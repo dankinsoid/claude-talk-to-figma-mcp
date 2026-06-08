@@ -174,15 +174,20 @@ function axisSize(node: any, parent: Stack, self: Stack, dim: "w" | "h", px: num
   return px;
 }
 
-/** Collapse padding: single value, or {v,h} for symmetric pairs, else [t,r,b,l]. */
-function padOf(node: any): number | number[] | { v: number; h: number } | undefined {
+/**
+ * Collapse padding: single value when uniform, {vertical,horizontal} for
+ * symmetric pairs, else [top,right,bottom,left].
+ */
+function padOf(
+  node: any
+): number | number[] | { vertical: number; horizontal: number } | undefined {
   const t = round(node.paddingTop || 0);
   const r = round(node.paddingRight || 0);
   const b = round(node.paddingBottom || 0);
   const l = round(node.paddingLeft || 0);
   if (!(t || r || b || l)) return undefined;
   if (t === r && r === b && b === l) return t;
-  if (t === b && l === r) return { v: t, h: l };
+  if (t === b && l === r) return { vertical: t, horizontal: l };
   return [t, r, b, l];
 }
 
