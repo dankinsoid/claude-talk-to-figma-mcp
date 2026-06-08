@@ -94,19 +94,10 @@ figma.ui.onmessage = async (msg) => {
         Math.max(1, Math.round(msg.height))
       );
       break;
-    case "pin-window": {
-      // reposition moves the window by a RELATIVE delta and clamps it inside the
-      // viewport. We can't read the current position, so we pin in two steps:
-      //   1) a huge delta slams the window into the bottom-left corner (clamped),
-      //      giving a known anchor regardless of where it was.
-      //   2) nudge inward by half the window + margin so it sits fully on-screen.
-      const w = Math.max(1, msg.width);
-      const h = Math.max(1, msg.height);
-      const m = msg.margin || 0;
+    case "pin-window":
+      // Big delta clamps the window into the bottom-left corner.
       figma.ui.reposition(-100000, 100000);
-      figma.ui.reposition(Math.round(w / 2 + m), -Math.round(h / 2 + m));
       break;
-    }
     case "execute-command":
       // Execute commands received from UI (which gets them from WebSocket)
       try {
