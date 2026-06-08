@@ -516,7 +516,14 @@
         compact: false,
         pinned: false, // once auto-collapsed, keep the window pinned bottom-left
         statusKind: "disconnected", // connected | disconnected | connecting
+        manualClose: false, // user pressed Disconnect — suppress auto-reconnect
+        reconnectTimer: null,
+        reconnectDelay: 1000, // backoff, grows to RECONNECT_MAX_DELAY
+        keepaliveTimer: null,
       };
+
+      const RECONNECT_MAX_DELAY = 30000;
+      const KEEPALIVE_INTERVAL = 20000;
 
       const SIZE_FULL = { w: 350, h: 600 };
       const SIZE_COMPACT = { w: 240, h: 40 };
@@ -655,13 +662,19 @@
           }
 
           state.serverPort = port;
+          // A connect attempt means we want to be online; clear any prior
+          // manual-disconnect flag so auto-reconnect is armed again.
+          state.manualClose = false;
           const wsUrl = `ws://localhost:${port}`;
 
           state.socket = new WebSocket(wsUrl);
 
           state.socket.onopen = () => {
-            // Generate random channel name
-            const channelName = generateChannelName();
+            state.reconnectDelay = 1000; // reset backoff after a good connect
+            // Reuse the same channel across reconnects so the agent (which
+            // already joined it) keeps talking to us. Only mint a new one on
+            // the very first connect.
+            const channelName = state.channel || generateChannelName();
             console.log("Joining channel:", channelName);
             state.channel = channelName;
 
@@ -682,10 +695,13 @@
               const data = JSON.parse(event.data);
               console.log("Received message:", data);
 
+              if (data.type === "pong") return; // keepalive ack
+
               if (data.type === "system") {
                 // Successfully joined channel
                 if (data.message && data.message.result) {
                   state.connected = true;
+                  startKeepalive();
                   const channelName = data.channel;
                   updateConnectionStatus(
                     true,
@@ -712,9 +728,19 @@
                   );
                 }
               } else if (data.type === "error") {
-                console.error("Error:", data.message);
-                updateConnectionStatus(false, `Error: ${data.message}`);
-                state.socket.close();
+                const text =
+                  typeof data.message === "string"
+                    ? data.message
+                    : data.message?.error || "Unknown error";
+                console.error("Error:", text);
+                // Only tear down for a pre-join failure (bad/duplicate
+                // channel). A routing error while connected (e.g. the peer was
+                // briefly gone) must not kill a healthy socket.
+                if (!state.connected) {
+                  updateConnectionStatus(false, `Error: ${text}`);
+                  state.socket.close();
+                }
+                return;
               }
 
               handleSocketMessage(data);
@@ -726,14 +752,19 @@
           state.socket.onclose = () => {
             state.connected = false;
             state.socket = null;
-            updateConnectionStatus(false, "Disconnected from server");
+            stopKeepalive();
+            if (state.manualClose) {
+              updateConnectionStatus(false, "Disconnected from server");
+            } else {
+              scheduleReconnect();
+            }
           };
 
           state.socket.onerror = (error) => {
             console.error("WebSocket error:", error);
-            updateConnectionStatus(false, "Connection error");
             state.connected = false;
-            state.socket = null;
+            // Don't null the socket or reconnect here — onclose fires next and
+            // owns the reconnect so we don't schedule it twice.
           };
         } catch (error) {
           console.error("Connection error:", error);
@@ -746,11 +777,61 @@
 
       // Disconnect from websocket server
       function disconnectFromServer() {
+        // User-initiated: suppress auto-reconnect and cancel any pending one.
+        state.manualClose = true;
+        if (state.reconnectTimer) {
+          clearTimeout(state.reconnectTimer);
+          state.reconnectTimer = null;
+        }
+        stopKeepalive();
         if (state.socket) {
           state.socket.close();
           state.socket = null;
-          state.connected = false;
-          updateConnectionStatus(false, "Disconnected from server");
+        }
+        state.connected = false;
+        updateConnectionStatus(false, "Disconnected from server");
+      }
+
+      // @ai-generated(guided)
+      // Schedule an auto-reconnect with exponential backoff. The plugin keeps
+      // its channel (state.channel), so the agent's joined channel stays valid.
+      function scheduleReconnect() {
+        if (state.reconnectTimer || state.manualClose) return;
+        const delay = state.reconnectDelay;
+        state.statusKind = "connecting";
+        updateConnectionStatus(
+          false,
+          `Connection lost. Reconnecting in ${Math.round(delay / 1000)}s…`
+        );
+        connectionStatus.className = "status info";
+        renderBadge();
+        state.reconnectTimer = setTimeout(() => {
+          state.reconnectTimer = null;
+          state.reconnectDelay = Math.min(
+            state.reconnectDelay * 2,
+            RECONNECT_MAX_DELAY
+          );
+          connectToServer(state.serverPort);
+        }, delay);
+      }
+
+      // Periodic app-level ping keeps the relay socket from being dropped as
+      // idle and surfaces a dead relay quickly (its close → reconnect).
+      function startKeepalive() {
+        stopKeepalive();
+        state.keepaliveTimer = setInterval(() => {
+          if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+            state.socket.send(
+              JSON.stringify({ type: "ping", channel: state.channel })
+            );
+          }
+        }, KEEPALIVE_INTERVAL);
+      }
+
+      function stopKeepalive() {
+        if (state.keepaliveTimer) {
+          clearInterval(state.keepaliveTimer);
+          state.keepaliveTimer = null;
         }
       }
 

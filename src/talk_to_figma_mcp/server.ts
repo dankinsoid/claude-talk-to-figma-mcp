@@ -2932,6 +2932,21 @@ function connectToFigma(port: number = 3055) {
 
       const json = JSON.parse(data) as ProgressMessage;
 
+      // Relay fail-fast: no client in the channel received the command. Reject
+      // the matching request now instead of waiting for the full timeout.
+      if (json.type === 'error') {
+        const errId = json.id || json.message?.id;
+        if (errId && pendingRequests.has(errId)) {
+          const request = pendingRequests.get(errId)!;
+          clearTimeout(request.timeout);
+          const reason = json.message?.error || json.message || 'Figma relay error';
+          logger.error(`Relay error for request ${errId}: ${reason}`);
+          request.reject(new Error(typeof reason === 'string' ? reason : JSON.stringify(reason)));
+          pendingRequests.delete(errId);
+        }
+        return;
+      }
+
       // Handle progress updates
       if (json.type === 'progress_update') {
         const progressData = json.message.data as CommandProgressUpdate;

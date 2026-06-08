@@ -109,6 +109,13 @@ const server = Bun.serve({
         }
         console.log(`Full message:`, JSON.stringify(data, null, 2));
 
+        // Keepalive from a client — answer so it knows the relay is alive and
+        // the socket stays warm. No channel routing needed.
+        if (data.type === "ping") {
+          ws.send(JSON.stringify({ type: "pong" }));
+          return;
+        }
+
         if (data.type === "join") {
           const channelName = data.channel;
           if (!channelName || typeof channelName !== "string") {
@@ -205,6 +212,18 @@ const server = Bun.serve({
           
           if (broadcastCount === 0) {
             console.log(`⚠️  No other clients in channel "${channelName}" to receive message!`);
+            // Fail fast: tell the sender now instead of letting it wait the
+            // full request timeout. Carry the request id so the MCP server can
+            // reject the matching pending request.
+            ws.send(JSON.stringify({
+              type: "error",
+              id: data.message?.id,
+              message: {
+                id: data.message?.id,
+                error: `No client is connected to channel "${channelName}" to handle the command. Is the Figma plugin still connected?`,
+              },
+              channel: channelName,
+            }));
           } else {
             console.log(`✓ Broadcast to ${broadcastCount} peer(s) in channel "${channelName}"`);
           }

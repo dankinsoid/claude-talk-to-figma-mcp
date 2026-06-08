@@ -2467,6 +2467,18 @@ function connectToFigma(port = 3055) {
   ws.on("message", (data) => {
     try {
       const json = JSON.parse(data);
+      if (json.type === "error") {
+        const errId = json.id || json.message?.id;
+        if (errId && pendingRequests.has(errId)) {
+          const request = pendingRequests.get(errId);
+          clearTimeout(request.timeout);
+          const reason = json.message?.error || json.message || "Figma relay error";
+          logger.error(`Relay error for request ${errId}: ${reason}`);
+          request.reject(new Error(typeof reason === "string" ? reason : JSON.stringify(reason)));
+          pendingRequests.delete(errId);
+        }
+        return;
+      }
       if (json.type === "progress_update") {
         const progressData = json.message.data;
         const requestId = json.id || "";
