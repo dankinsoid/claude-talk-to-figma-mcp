@@ -34,6 +34,12 @@ export interface ShapeOptions {
   detail?: DetailProfile;
   /** Collapse icon-like subtrees (no text, vector leaves) to one ICON node. */
   collapseIcons?: boolean;
+  /**
+   * Collapse repeated instances of the same component: the first instance of a
+   * given component renders in full, later copies become a stub carrying the
+   * differentiating text. Default true.
+   */
+  collapseRepeats?: boolean;
   /** Hoist paints/strokes used more than once into a shared `_defs` table. */
   dedupe?: boolean;
 }
@@ -226,19 +232,72 @@ function layoutSpec(node: any, out: any, stack: Stack): void {
 }
 
 /**
+ * Mark instances to collapse as repeats: walking in render (pre-)order, the
+ * first instance of each component is kept; later instances of an already-seen
+ * component are recorded so the render/budget passes treat them as leaves. The
+ * requested root is never collapsed. Returns the set of repeat node ids.
+ */
+function planRepeats(root: any, enabled: boolean): Set<string> {
+  const collapsed = new Set<string>();
+  if (!enabled) return collapsed;
+  const seen = new Set<string>();
+  const visit = (node: any, isRoot: boolean) => {
+    if (!isRoot && node.type === "INSTANCE" && node.componentId) {
+      if (seen.has(node.componentId)) {
+        collapsed.add(node.id);
+        return; // a copy of an already-seen component — don't descend
+      }
+      seen.add(node.componentId);
+    }
+    const kids = node.children;
+    if (kids) for (const c of kids) visit(c, false);
+  };
+  visit(root, true);
+  return collapsed;
+}
+
+/**
+ * Compact an instance's componentProperties to a flat {name: value} map — the
+ * config that distinguishes this instance (text/boolean/variant/instance-swap).
+ * Property keys carry a "#id" suffix in Figma; strip it for readability.
+ */
+function compactProps(cp: any): Record<string, any> | undefined {
+  if (!cp || typeof cp !== "object") return undefined;
+  const o: Record<string, any> = {};
+  for (const key of Object.keys(cp)) {
+    const name = key.split("#")[0];
+    const v = cp[key];
+    o[name] = v && typeof v === "object" && "value" in v ? v.value : v;
+  }
+  return Object.keys(o).length ? o : undefined;
+}
+
+/** Collect up to `cap` text strings from a subtree (the instance's visible words). */
+function collectText(node: any, acc: string[], cap: number): void {
+  if (acc.length >= cap) return;
+  if (node.type === "TEXT" && typeof node.characters === "string") acc.push(node.characters);
+  const kids = node.children;
+  if (kids) for (const c of kids) {
+    if (acc.length >= cap) break;
+    collectText(c, acc, cap);
+  }
+}
+
+/**
  * Breadth-first expansion plan. Walks the tree level by level admitting nodes
  * until the budget runs out; nodes beyond it are recorded as stubs. Returns the
  * set of node ids whose children should be expanded inline. Icons and depth-cap
  * boundaries are not expanded. This decouples "how much to show" from the
  * render pass so size stays predictable across wide and deep trees alike.
  */
-function planExpansion(root: any, opts: Required<ShapeOptions>): Set<string> {
+function planExpansion(root: any, opts: Required<ShapeOptions>, repeats: Set<string>): Set<string> {
   const expand = new Set<string>([root.id]);
   let count = 1; // root always shown
   const queue: { node: any; depth: number }[] = [{ node: root, depth: 0 }];
   while (queue.length) {
     const { node, depth } = queue.shift()!;
     if (opts.collapseIcons && isIcon(node, depth)) continue; // icon: children hidden
+    if (repeats.has(node.id)) continue; // repeated instance: children hidden
     const kids: any[] = node.children || [];
     if (!kids.length) continue;
     const underCap = depth + 1 <= opts.depth;
@@ -276,7 +335,8 @@ function shapeRec(
   f: Fields,
   curDepth: number,
   parent: Stack,
-  expand: Set<string>
+  expand: Set<string>,
+  repeats: Set<string>
 ): any {
   const out: any = { id: node.id, name: node.name, type: node.type };
 
@@ -287,6 +347,7 @@ function shapeRec(
     return out;
   }
 
+  const isRepeat = repeats.has(node.id);
   const myStack = stackOf(node);
   // Geometry: inside an auto-layout parent a child's x/y are layout-determined,
   // so we drop them and express only sizing (fill vs fixed px). Absolutely-
@@ -306,7 +367,8 @@ function shapeRec(
       if (b) out.box = b;
     }
   }
-  if (f.box) layoutSpec(node, out, myStack);
+  // A collapsed repeat hides its internals, so its internal arrangement is moot.
+  if (f.box && !isRepeat) layoutSpec(node, out, myStack);
   if (node.cornerRadius !== undefined && (f.style || f.box)) {
     out.cornerRadius = round(node.cornerRadius, 1);
   }
@@ -328,9 +390,21 @@ function shapeRec(
 
   const kids: any[] = node.children || [];
   if (kids.length) {
-    if (expand.has(node.id)) {
+    if (isRepeat) {
+      // Repeated instance: surface the config that differentiates this copy
+      // (component properties + any visible text), hide the internals.
+      const props = compactProps(node.componentProperties);
+      if (props) out.props = props;
+      const texts: string[] = [];
+      collectText(node, texts, 6);
+      if (texts.length) out.text = texts.length === 1 ? texts[0] : texts;
+      out.childCount = kids.length;
+      out.more = true; // drill in for the full copy
+    } else if (expand.has(node.id)) {
+      // shapeRec handles each child's own state (icon / repeat / full); only
+      // budget-truncated children (not in expand) become generic stubs.
       out.children = kids.map((c) =>
-        expand.has(c.id) ? shapeRec(c, opts, f, curDepth + 1, myStack, expand) : stubNode(c, opts.collapseIcons)
+        expand.has(c.id) ? shapeRec(c, opts, f, curDepth + 1, myStack, expand, repeats) : stubNode(c, opts.collapseIcons)
       );
     } else {
       // Node itself reached the budget edge — surface as a stub in place.
@@ -388,11 +462,13 @@ export function shapeNode(node: any, options: ShapeOptions = {}): any {
     depth: options.depth ?? Infinity,
     detail: options.detail ?? "auto",
     collapseIcons: options.collapseIcons ?? true,
+    collapseRepeats: options.collapseRepeats ?? true,
     dedupe: options.dedupe ?? true,
   };
   const fields = PROFILES[opts.detail] ?? PROFILES.auto;
-  const expand = planExpansion(node, opts);
-  const shaped = shapeRec(node, opts, fields, 0, null, expand);
+  const repeats = planRepeats(node, opts.collapseRepeats);
+  const expand = planExpansion(node, opts, repeats);
+  const shaped = shapeRec(node, opts, fields, 0, null, expand, repeats);
   if (opts.dedupe && fields.style) {
     const defs = dedupe(shaped);
     if (defs) shaped._defs = defs;

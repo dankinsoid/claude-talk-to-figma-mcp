@@ -338,6 +338,17 @@ function filterFigmaNode(node) {
     type: node.type,
   };
 
+  // Lets the server collapse repeated instances of the same component (consumed,
+  // not echoed): the first instance is shown in full, later copies as a stub.
+  if (node.componentId) {
+    filtered.componentId = node.componentId;
+  }
+  // The config that distinguishes an instance from its master — shown in place
+  // of the hidden internals on a collapsed repeat.
+  if (node.componentProperties) {
+    filtered.componentProperties = node.componentProperties;
+  }
+
   if (node.fills && node.fills.length > 0) {
     filtered.fills = node.fills.map((fill) => {
       var processedFill = Object.assign({}, fill);

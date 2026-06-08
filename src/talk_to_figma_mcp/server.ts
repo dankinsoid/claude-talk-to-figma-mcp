@@ -172,6 +172,10 @@ const shapeParams = {
     .boolean()
     .optional()
     .describe("Collapse icon-like subtrees (no text, vector leaves) to a single ICON node with more:true (default true)."),
+  collapseRepeats: z
+    .boolean()
+    .optional()
+    .describe("Collapse repeated instances of the same component: the first renders in full, later copies become a stub with their props/text and more:true (default true)."),
   dedupe: z
     .boolean()
     .optional()
@@ -183,6 +187,7 @@ type ShapeArgs = {
   maxNodes?: number;
   depth?: number;
   collapseIcons?: boolean;
+  collapseRepeats?: boolean;
   dedupe?: boolean;
 };
 
@@ -193,9 +198,9 @@ server.tool(
   {
     ...shapeParams,
   },
-  async ({ detail, maxNodes, depth, collapseIcons, dedupe }: any) => {
+  async ({ detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe }: any) => {
     try {
-      const opts: ShapeArgs = { detail, maxNodes, depth, collapseIcons, dedupe };
+      const opts: ShapeArgs = { detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe };
       const result = await sendCommandToFigma("read_my_design", {});
       const shaped = Array.isArray(result)
         ? result.map((r: any) => (r && r.document ? { ...r, document: shapeNode(r.document, opts) } : r))
@@ -230,14 +235,14 @@ server.tool(
     nodeId: z.string().describe("The ID of the node to get information about"),
     ...shapeParams,
   },
-  async ({ nodeId, detail, maxNodes, depth, collapseIcons, dedupe }: any) => {
+  async ({ nodeId, detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe }: any) => {
     try {
       const result = await sendCommandToFigma("get_node_info", { nodeId });
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify(shapeNode(result, { detail, maxNodes, depth, collapseIcons, dedupe }))
+            text: JSON.stringify(shapeNode(result, { detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe }))
           }
         ]
       };
@@ -366,9 +371,9 @@ server.tool(
     nodeIds: z.array(z.string()).describe("Array of node IDs to get information about"),
     ...shapeParams,
   },
-  async ({ nodeIds, detail, maxNodes, depth, collapseIcons, dedupe }: any) => {
+  async ({ nodeIds, detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe }: any) => {
     try {
-      const opts: ShapeArgs = { detail, maxNodes, depth, collapseIcons, dedupe };
+      const opts: ShapeArgs = { detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe };
       const results = await Promise.all(
         nodeIds.map(async (nodeId: any) => {
           const result = await sendCommandToFigma('get_node_info', { nodeId });
