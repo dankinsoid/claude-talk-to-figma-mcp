@@ -1185,7 +1185,9 @@
       badgeConn.addEventListener("click", () => connectButton.click());
       badgeChannel.addEventListener("click", () => {
         if (state.statusKind !== "connected" || !state.channel) return;
-        copyText(state.channel);
+        // Copy a ready-to-paste instruction so the agent can join without
+        // needing it explained.
+        copyText(`Подключись к каналу Figma плагина: ${state.channel}`);
         const prev = badgeChannel.textContent;
         badgeChannel.textContent = "Copied!";
         setTimeout(() => {
