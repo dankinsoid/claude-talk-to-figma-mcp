@@ -1,5 +1,6 @@
 {
   "name": "Claude MCP Plugin",
+  "id": "1646313895472569699",
   "api": "1.0.0",
   "main": "code.js",
   "ui": "ui.html",
