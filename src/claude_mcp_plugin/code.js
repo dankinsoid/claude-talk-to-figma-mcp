@@ -266,6 +266,8 @@ async function handleCommand(command, params) {
       return await setSelections(params);
     case "combine_as_variants":
       return await combineAsVariants(params);
+    case "boolean_operation":
+      return await booleanOperation(params);
     case "get_variables":
       return await getVariables(params);
     case "set_variables":
@@ -3218,6 +3220,54 @@ async function combineAsVariants(params) {
     childCount: set.children.length,
     variantProperties,
     variantWarning,
+  };
+}
+
+// Combine 2+ vector/shape nodes with a boolean op (union/subtract/intersect/
+// exclude) into one BOOLEAN_OPERATION node. Order matters: for subtract the
+// first node is the base and the rest are cut out of it; same z-order logic
+// drives exclude. The op is non-destructive — children stay editable inside.
+async function booleanOperation(params) {
+  const { operation, nodeIds, name, parentId } = params || {};
+  const opFns = {
+    union: figma.union,
+    subtract: figma.subtract,
+    intersect: figma.intersect,
+    exclude: figma.exclude,
+  };
+  const fn = opFns[operation];
+  if (!fn) {
+    throw new Error(`boolean_operation requires \`operation\` one of: ${Object.keys(opFns).join(", ")}`);
+  }
+  if (!Array.isArray(nodeIds) || nodeIds.length < 2) {
+    throw new Error("boolean_operation requires `nodeIds` with at least 2 node ids");
+  }
+
+  const nodes = [];
+  for (const id of nodeIds) {
+    const node = await figma.getNodeByIdAsync(id);
+    if (!node) throw new Error(`Node not found: ${id}`);
+    nodes.push(node);
+  }
+
+  let parent = figma.currentPage;
+  if (parentId) {
+    parent = await figma.getNodeByIdAsync(parentId);
+    if (!parent) throw new Error(`Parent not found: ${parentId}`);
+  }
+
+  // figma.union/subtract/intersect/exclude throw if a node isn't a valid
+  // boolean operand (e.g. not a vector/shape) or the parent can't host it.
+  const result = fn.call(figma, nodes, parent);
+  if (typeof name === "string" && name) result.name = name;
+
+  return {
+    success: true,
+    id: result.id,
+    name: result.name,
+    type: result.type,
+    booleanOperation: result.booleanOperation,
+    childCount: result.children.length,
   };
 }
 

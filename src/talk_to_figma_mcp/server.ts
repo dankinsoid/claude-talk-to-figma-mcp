@@ -1716,6 +1716,45 @@ server.tool(
   }
 );
 
+// Boolean operations: cut/merge shapes into a single BOOLEAN_OPERATION node
+server.tool(
+  "boolean_operation",
+  "Combine 2+ vector/shape nodes with a boolean operation into one non-destructive BOOLEAN_OPERATION node (children stay editable). `union` merges, `subtract` cuts the 2nd+ nodes out of the 1st, `intersect` keeps only overlap, `exclude` keeps the non-overlapping parts. Order matters for subtract/exclude — the first nodeId is the base. Operands should be vectors, shapes (rect/ellipse/polygon/star), or other boolean ops.",
+  {
+    operation: z
+      .enum(["union", "subtract", "intersect", "exclude"])
+      .describe("Which boolean op to apply"),
+    nodeIds: z
+      .array(z.string())
+      .min(2)
+      .describe("IDs of the nodes to combine (at least 2). For subtract/exclude the first is the base."),
+    name: z.string().optional().describe("Name for the resulting boolean operation node"),
+    parentId: z.string().optional().describe("Parent node to place the result in (defaults to current page)"),
+  },
+  async ({ operation, nodeIds, name, parentId }: any) => {
+    try {
+      const result: any = await sendCommandToFigma("boolean_operation", { operation, nodeIds, name, parentId });
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Created ${operation} "${result.name}" (ID: ${result.id}) from ${result.childCount} nodes.`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error performing boolean operation: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
 // ---- Variables / design tokens ----
 
 server.tool(
@@ -1960,6 +1999,7 @@ type FigmaCommand =
   | "set_focus"
   | "set_selections"
   | "combine_as_variants"
+  | "boolean_operation"
   | "get_variables"
   | "set_variables"
   | "bind_variables";
@@ -2066,6 +2106,12 @@ type CommandParams = {
     name?: string;
     parentId?: string;
     rename?: Array<{ nodeId: string; name: string }>;
+  };
+  boolean_operation: {
+    operation: "union" | "subtract" | "intersect" | "exclude";
+    nodeIds: string[];
+    name?: string;
+    parentId?: string;
   };
   get_variables: {
     collection?: string;

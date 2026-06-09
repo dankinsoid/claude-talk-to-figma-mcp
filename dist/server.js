@@ -2505,6 +2505,38 @@ server.tool(
   }
 );
 server.tool(
+  "boolean_operation",
+  "Combine 2+ vector/shape nodes with a boolean operation into one non-destructive BOOLEAN_OPERATION node (children stay editable). `union` merges, `subtract` cuts the 2nd+ nodes out of the 1st, `intersect` keeps only overlap, `exclude` keeps the non-overlapping parts. Order matters for subtract/exclude \u2014 the first nodeId is the base. Operands should be vectors, shapes (rect/ellipse/polygon/star), or other boolean ops.",
+  {
+    operation: z4.enum(["union", "subtract", "intersect", "exclude"]).describe("Which boolean op to apply"),
+    nodeIds: z4.array(z4.string()).min(2).describe("IDs of the nodes to combine (at least 2). For subtract/exclude the first is the base."),
+    name: z4.string().optional().describe("Name for the resulting boolean operation node"),
+    parentId: z4.string().optional().describe("Parent node to place the result in (defaults to current page)")
+  },
+  async ({ operation, nodeIds, name, parentId: parentId2 }) => {
+    try {
+      const result = await sendCommandToFigma("boolean_operation", { operation, nodeIds, name, parentId: parentId2 });
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Created ${operation} "${result.name}" (ID: ${result.id}) from ${result.childCount} nodes.`
+          }
+        ]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error performing boolean operation: ${error instanceof Error ? error.message : String(error)}`
+          }
+        ]
+      };
+    }
+  }
+);
+server.tool(
   "get_variables",
   "Read local Figma variables (design tokens): every variable collection, its modes, and each variable's per-mode value. Colors come back as hex, and aliases (variables referencing other variables) resolve to {alias: <target name>, aliasId}. Use this to discover token names/ids before binding or updating them. Pass `collection` to filter to one collection by name or id.",
   {
