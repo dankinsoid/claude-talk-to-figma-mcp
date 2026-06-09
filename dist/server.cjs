@@ -651,6 +651,7 @@ var saveParams = {
   )
 };
 var outputFileSeq = 0;
+var INLINE_MAX_BYTES = 1024 * 1024;
 async function writeOutputFile(baseName, ext, data, outputPath) {
   const safeBase = baseName.replace(/[^a-zA-Z0-9_-]/g, "-");
   const target = outputPath ? outputPath : (0, import_path.join)((0, import_os.tmpdir)(), "talk-to-figma", `${safeBase}-${Date.now()}-${outputFileSeq++}.${ext}`);
@@ -1130,45 +1131,66 @@ server.tool(
 );
 server.tool(
   "export_node_as_image",
-  "Export a node as an image from Figma",
+  "Export one or more nodes as images from Figma. Each node may request several scales at once, so a single call can produce many files.",
   {
-    nodeId: import_zod2.z.string().describe("The ID of the node to export"),
-    format: import_zod2.z.enum(["PNG", "JPG", "SVG", "PDF"]).optional().describe("Export format"),
-    scale: import_zod2.z.number().positive().optional().describe("Export scale"),
-    outputPath: import_zod2.z.string().optional().describe(
-      "File path to write the exported image to. Parent dirs are created. Defaults to an auto-named file under the OS temp dir. The image is always written to disk \u2014 only the path is returned, never inline base64 (which is very expensive in the LLM context)."
+    nodes: import_zod2.z.array(
+      import_zod2.z.object({
+        nodeId: import_zod2.z.string().describe("The ID of the node to export"),
+        scale: import_zod2.z.union([import_zod2.z.number().positive(), import_zod2.z.array(import_zod2.z.number().positive()).nonempty()]).optional().describe(
+          "Export scale(s): a single number, or an array to emit one image per scale. Only applies to raster formats (PNG/JPG); ignored for SVG/PDF. Default 1."
+        )
+      })
+    ).nonempty().describe("Nodes to export. Each entry exports its node at its own scale(s)."),
+    format: import_zod2.z.enum(["PNG", "JPG", "SVG", "PDF"]).optional().describe("Export format shared by all nodes (default PNG)."),
+    inline: import_zod2.z.boolean().optional().describe(
+      `Return the image(s) directly in the response instead of writing files, so you can see them. Only set this when you actually need to look at the pixels. Honored only for raster formats (PNG/JPG) whose encoded size is under ${INLINE_MAX_BYTES / 1024}KB \u2014 anything larger (or SVG/PDF) falls back to a file to avoid blowing up the context.`
+    ),
+    outputDir: import_zod2.z.string().optional().describe(
+      "Directory to write the images into (created if missing). Defaults to the OS temp dir. Files are auto-named export-<nodeId>@<scale>x.<ext>. Ignored for images returned inline."
     )
   },
-  async ({ nodeId, format, scale, outputPath }) => {
-    try {
-      const fmt = format || "PNG";
-      const result = await sendCommandToFigma("export_node_as_image", {
-        nodeId,
-        format: fmt,
-        scale: scale || 1
-      });
-      const typedResult = result;
-      const ext = fmt.toLowerCase() === "jpg" ? "jpg" : fmt.toLowerCase();
-      const buffer = Buffer.from(typedResult.imageData, "base64");
-      const { path, bytes } = await writeOutputFile(`export-${nodeId}`, ext, buffer, outputPath);
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Exported ${fmt} (${bytes} bytes) to ${path}`
+  async ({ nodes, format, inline, outputDir }) => {
+    const fmt = format || "PNG";
+    const ext = fmt.toLowerCase() === "jpg" ? "jpg" : fmt.toLowerCase();
+    const inlineable = inline && (fmt === "PNG" || fmt === "JPG");
+    const content = [];
+    const written = [];
+    const errors = [];
+    for (const { nodeId, scale } of nodes) {
+      try {
+        const result = await sendCommandToFigma("export_node_as_image", {
+          nodeId,
+          format: fmt,
+          scale: scale ?? 1
+        });
+        const typedResult = result;
+        for (const img of typedResult.images) {
+          const buffer = Buffer.from(img.imageData, "base64");
+          if (inlineable && buffer.length <= INLINE_MAX_BYTES) {
+            content.push({ type: "image", data: img.imageData, mimeType: typedResult.mimeType });
+            written.push(`${nodeId} @${img.scale}x \u2192 inline (${buffer.length} bytes)`);
+            continue;
           }
-        ]
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error exporting node as image: ${error instanceof Error ? error.message : String(error)}`
-          }
-        ]
-      };
+          const safeId = nodeId.replace(/[^a-zA-Z0-9_-]/g, "-");
+          const baseName = `export-${safeId}@${img.scale}x`;
+          const target = outputDir ? (0, import_path.join)(outputDir, `${baseName}.${ext}`) : void 0;
+          const { path, bytes } = await writeOutputFile(baseName, ext, buffer, target);
+          const note = inline && !inlineable ? " (file: inline unsupported for this format)" : inline ? " (file: too large to inline)" : "";
+          written.push(`${nodeId} @${img.scale}x \u2192 ${path} (${bytes} bytes)${note}`);
+        }
+      } catch (error) {
+        errors.push(
+          `${nodeId}: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
     }
+    const lines = [
+      `Exported ${written.length} ${fmt} image(s):`,
+      ...written,
+      ...errors.length ? ["", `Failed (${errors.length}):`, ...errors] : []
+    ];
+    content.unshift({ type: "text", text: lines.join("\n") });
+    return { content };
   }
 );
 server.tool(
@@ -1505,7 +1527,7 @@ edit_nodes({ edits: [
 ## 3. Chunk large jobs and verify visually
 For big designs, replace in logical chunks (a table's rows, a card group, one screen area) rather than all at once, and after each chunk export a small image to confirm text still fits and the layout holds before continuing:
 \`\`\`
-export_node_as_image({ nodeId: "chunk-node-id", format: "PNG", scale: 0.5 })  // smaller scale for bigger chunks
+export_node_as_image({ nodes: [{ nodeId: "chunk-node-id", scale: 0.5 }] })  // smaller scale for bigger chunks; pass several nodes/scales to batch
 \`\`\`
 Adapt text to its container: if it overflows, shorten or break lines at sensible points, and keep related content (labels with their fields, headers with their data) consistent across chunks.`
           }

@@ -935,60 +935,52 @@ async function getLocalComponents(params) {
 //   }
 // }
 
-async function exportNodeAsImage(params) {
-  const { nodeId, scale = 1 } = params || {};
+const EXPORT_MIME_TYPES = {
+  PNG: "image/png",
+  JPG: "image/jpeg",
+  SVG: "image/svg+xml",
+  PDF: "application/pdf",
+};
 
-  const format = "PNG";
+async function exportNodeAsImage(params) {
+  const { nodeId, format = "PNG", scale = 1 } = params || {};
 
   if (!nodeId) {
     throw new Error("Missing nodeId parameter");
+  }
+  if (!EXPORT_MIME_TYPES[format]) {
+    throw new Error(`Unsupported export format: ${format}`);
   }
 
   const node = await figma.getNodeByIdAsync(nodeId);
   if (!node) {
     throw new Error(`Node not found with ID: ${nodeId}`);
   }
-
   if (!("exportAsync" in node)) {
     throw new Error(`Node does not support exporting: ${nodeId}`);
   }
 
+  const mimeType = EXPORT_MIME_TYPES[format];
+  // The SCALE constraint only affects raster output; SVG/PDF are vector, so a
+  // list of scales collapses to a single export for them.
+  const usesScale = format === "PNG" || format === "JPG";
+  const scales = usesScale && Array.isArray(scale) ? scale : [usesScale ? scale : 1];
+
   try {
-    const settings = {
-      format: format,
-      constraint: { type: "SCALE", value: scale },
-    };
-
-    const bytes = await node.exportAsync(settings);
-
-    let mimeType;
-    switch (format) {
-      case "PNG":
-        mimeType = "image/png";
-        break;
-      case "JPG":
-        mimeType = "image/jpeg";
-        break;
-      case "SVG":
-        mimeType = "image/svg+xml";
-        break;
-      case "PDF":
-        mimeType = "application/pdf";
-        break;
-      default:
-        mimeType = "application/octet-stream";
+    const images = [];
+    for (const s of scales) {
+      const settings = usesScale
+        ? { format, constraint: { type: "SCALE", value: s } }
+        : { format };
+      const bytes = await node.exportAsync(settings);
+      images.push({ scale: s, imageData: customBase64Encode(bytes) });
     }
-
-    // Proper way to convert Uint8Array to base64
-    const base64 = customBase64Encode(bytes);
-    // const imageData = `data:${mimeType};base64,${base64}`;
 
     return {
       nodeId,
       format,
-      scale,
       mimeType,
-      imageData: base64,
+      images,
     };
   } catch (error) {
     throw new Error(`Error exporting node as image: ${error.message}`);
