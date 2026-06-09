@@ -618,6 +618,81 @@ server.tool(
   }
 );
 server.tool(
+  "grep_nodes",
+  'Search the TEXT content of a subtree by regex \u2014 the Figma analog of grep. Tests each TEXT node\'s `characters` LINE BY LINE (Figma text is multi-line) and returns hits one per line as `id:"name".TEXT @parent L<n>: <line>`, where `L<n>` is the 1-based line within that text node and `<line>` is the matching line (long lines are windowed around the match; pass `onlyMatch:true` for just the matched substrings, like grep -o). This searches CONTENT, not names \u2014 to match node names use glob_nodes\' `name` glob instead. `pattern` is a JS regex (not a shell glob); `ignoreCase` adds the `i` flag. Scope with `root` (node id to search under, default current page), `depth` (cap descent), and `within` (an absolute rect \u2014 only nodes intersecting it; get coords from a prior bbox). `mode` shapes output: "content" (default, every matching line), "nodes" (one line per matching node with its hit count, like grep -l), or "count" (just totals). Ids (and `@parent`) are short counters (n0, n1, ...) \u2014 feed any straight into read/edit tools. Results cap at `maxMatches` line-hits (default 1000); a `(truncated)` note is appended if hit.',
+  {
+    pattern: z.string().describe('JavaScript regular expression source (NOT a shell glob). E.g. "\\\\bCTA\\\\b", "\\\\$\\\\d+", "left$".'),
+    root: z.string().optional().describe("Node id to search under. Defaults to the current page. Accepts short ids (n0, ...)."),
+    ignoreCase: z.boolean().optional().describe("Case-insensitive match (regex `i` flag). Default false."),
+    onlyMatch: z.boolean().optional().describe("Report only the matched substring(s) per line instead of the whole line (grep -o). Default false."),
+    mode: z.enum(["content", "nodes", "count"]).optional().describe('Output shape: "content" (default; each matching line), "nodes" (one line per matching node + its hit count), or "count" (totals only).'),
+    depth: z.number().optional().describe("Max depth below root to descend (root's direct children = 1). Omit for unlimited."),
+    within: z.object({
+      x: z.number(),
+      y: z.number(),
+      width: z.number(),
+      height: z.number()
+    }).optional().describe("Absolute rectangle; keep only TEXT nodes whose bounding box intersects it. Same coordinate space as glob_nodes' [x,y wxh]."),
+    bbox: z.boolean().optional().describe("Append each hit node's absolute bounding box as [x,y wxh]. Default false."),
+    maxMatches: z.number().optional().describe("Hard cap on collected line-hits before the walk stops. Default 1000."),
+    ...saveParams
+  },
+  async ({ pattern, root, ignoreCase, onlyMatch, mode, depth, within, bbox, maxMatches, saveToFile, outputPath }) => {
+    try {
+      const result = await sendCommandToFigma("grep_nodes", {
+        pattern,
+        root,
+        ignoreCase,
+        onlyMatch,
+        depth,
+        within,
+        bbox,
+        maxMatches
+      });
+      const matches = renumberIds(result?.matches || []);
+      const fmtParent = (pid) => pid ? ` @${renumberIds({ id: pid }).id}` : "";
+      const fmtBox = (m) => m.bbox ? ` [${m.bbox.x},${m.bbox.y} ${m.bbox.w}x${m.bbox.h}]` : "";
+      let text;
+      let summary;
+      const outMode = mode || "content";
+      if (outMode === "count") {
+        text = `${result?.count ?? matches.length} matching lines in ${result?.nodeCount ?? 0} nodes` + (result?.truncated ? " (truncated)" : "");
+        summary = "count";
+      } else if (outMode === "nodes") {
+        const counts = /* @__PURE__ */ new Map();
+        for (const m of matches) {
+          const e = counts.get(m.id) || { name: m.name, type: m.type, parentId: m.parentId, n: 0 };
+          e.n++;
+          counts.set(m.id, e);
+        }
+        const lines = [...counts.entries()].map(
+          ([id, e]) => `${id}:${JSON.stringify(e.name)}.${e.type}${fmtParent(e.parentId)} (${e.n} match${e.n === 1 ? "" : "es"})`
+        );
+        text = (lines.join("\n") || "(no matches)") + (result?.truncated ? "\n(truncated)" : "");
+        summary = `${counts.size} nodes`;
+      } else {
+        const lines = matches.map(
+          (m) => `${m.id}:${JSON.stringify(m.name)}.${m.type}${fmtParent(m.parentId)}${fmtBox(m)} L${m.line}: ${m.text}`
+        );
+        text = (lines.join("\n") || "(no matches)") + (result?.truncated ? "\n(truncated)" : "");
+        summary = `${matches.length} lines`;
+      }
+      return {
+        content: [await textContent(text, summary, { saveToFile, outputPath }, "grep")]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error grepping nodes: ${error instanceof Error ? error.message : String(error)}`
+          }
+        ]
+      };
+    }
+  }
+);
+server.tool(
   "get_nodes_info",
   "Get information about multiple nodes in Figma, compacted for low token cost. Same depth/collapse controls as get_node_info.",
   {

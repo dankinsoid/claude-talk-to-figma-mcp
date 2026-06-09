@@ -202,6 +202,8 @@ async function handleCommand(command, params) {
       return await setAnnotation(params);
     case "glob_nodes":
       return await globNodes(params);
+    case "grep_nodes":
+      return await grepNodes(params);
     case "set_multiple_annotations":
       return await setMultipleAnnotations(params);
     case "get_instance_overrides":
@@ -2705,6 +2707,125 @@ async function globNodes(params) {
   walk(rootNode, 0, null);
 
   return { count: matches.length, matches };
+}
+
+// @ai-generated(guided)
+/**
+ * Content search over a subtree — the Figma analog of grep. Walks every
+ * container under `root` and tests each TEXT node's `characters` against a
+ * regex, LINE BY LINE (Figma text is multi-line), so a hit reports its 1-based
+ * line number like grep's `file:line:`. Names are NOT searched here — that is
+ * glob_nodes' job; grep is for the text *content*.
+ * @param {Object} params
+ * @param {string} params.pattern - JS regex source (not a glob).
+ * @param {string} [params.root] - Node id to search under; defaults to current page.
+ * @param {boolean} [params.ignoreCase] - Case-insensitive match (regex `i`). Default false.
+ * @param {boolean} [params.onlyMatch] - Report only the matched substrings, not the whole line (grep -o).
+ * @param {number} [params.depth] - Max depth below root (direct children = 1). Omit = unlimited.
+ * @param {{x,y,width,height}} [params.within] - Keep only nodes intersecting this absolute rect.
+ * @param {boolean} [params.bbox] - Include each hit node's absolute bbox. Default false.
+ * @param {number} [params.maxMatches=1000] - Hard cap on collected line-hits; walk stops after.
+ * @returns {Promise<{count:number,nodeCount:number,truncated:boolean,matches:Array<{id,name,type,parentId,line,text,bbox?}>}>}
+ */
+async function grepNodes(params) {
+  const { root, pattern, ignoreCase, onlyMatch, depth, within, bbox } = params || {};
+  if (!pattern) throw new Error("grep_nodes requires a `pattern`");
+
+  let rootNode;
+  if (root) {
+    rootNode = await figma.getNodeByIdAsync(root);
+    if (!rootNode) throw new Error(`Node with ID ${root} not found`);
+  } else {
+    rootNode = figma.currentPage;
+  }
+
+  // Always global (matchAll/onlyMatch); `i` opt-in. Invalid source → clear error.
+  let re;
+  try {
+    re = new RegExp(pattern, ignoreCase ? "gi" : "g");
+  } catch (e) {
+    throw new Error(`Invalid regex pattern: ${e.message}`);
+  }
+
+  const region = within
+    ? { x: within.x, y: within.y, width: within.width, height: within.height }
+    : null;
+  const maxDepth = typeof depth === "number" ? depth : Infinity;
+  const includeBbox = bbox === true; // default off — grep is about text, not geometry
+  const maxMatches = typeof params.maxMatches === "number" ? params.maxMatches : 1000;
+
+  const matches = [];
+  const hitNodes = new Set();
+  let truncated = false;
+
+  // Center a long line on its first match so one giant paragraph can't blow the
+  // token budget; short lines pass through whole (grep prints the full line).
+  const snippet = (line, idx, win) => {
+    win = win || 120;
+    if (line.length <= 2 * win) return line;
+    const start = Math.max(0, idx - win);
+    const end = Math.min(line.length, idx + win);
+    return (start > 0 ? "…" : "") + line.slice(start, end) + (end < line.length ? "…" : "");
+  };
+
+  // Descend through every container regardless of match (any-depth), exactly
+  // like globNodes; only TEXT nodes carry searchable content. Spatial filter
+  // gates the match, never the walk (a child may overflow its clipped parent).
+  const walk = (node, d, parentId) => {
+    if (truncated) return;
+    if (d > 0 && node.type === "TEXT") {
+      const abox = node.absoluteBoundingBox || null;
+      if (!region || (abox && rectsIntersect(abox, region))) {
+        const chars = node.characters || "";
+        const lines = chars.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          re.lastIndex = 0;
+          const found = [];
+          let m;
+          while ((m = re.exec(line)) !== null) {
+            found.push(m);
+            if (m.index === re.lastIndex) re.lastIndex++; // guard zero-width matches
+          }
+          if (found.length) {
+            const hit = {
+              id: node.id,
+              name: node.name || "",
+              type: node.type,
+              parentId,
+              line: i + 1,
+              text: onlyMatch
+                ? found.map((f) => f[0]).join(" … ")
+                : snippet(line, found[0].index),
+            };
+            if (includeBbox && abox) {
+              hit.bbox = {
+                x: Math.round(abox.x),
+                y: Math.round(abox.y),
+                w: Math.round(abox.width),
+                h: Math.round(abox.height),
+              };
+            }
+            matches.push(hit);
+            hitNodes.add(node.id);
+            if (matches.length >= maxMatches) {
+              truncated = true;
+              return;
+            }
+          }
+        }
+      }
+    }
+    if (d < maxDepth && "children" in node) {
+      for (const child of node.children) {
+        walk(child, d + 1, node.id);
+        if (truncated) return;
+      }
+    }
+  };
+  walk(rootNode, 0, null);
+
+  return { count: matches.length, nodeCount: hitNodes.size, truncated, matches };
 }
 
 /** Axis-aligned rectangle overlap test (touching edges do not count). */
