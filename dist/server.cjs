@@ -615,7 +615,8 @@ function validateEditValue(path, value) {
   else schema = FIELD_SCHEMAS[leaf] ?? null;
   if (!schema) return null;
   const r = schema.safeParse(value);
-  return r.success ? null : r.error.issues[0]?.message ?? "invalid value";
+  if (r.success) return null;
+  return r.error.issues[0]?.message ?? "invalid value";
 }
 
 // src/talk_to_figma_mcp/server.ts

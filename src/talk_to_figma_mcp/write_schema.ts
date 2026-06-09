@@ -302,5 +302,8 @@ export function validateEditValue(path: string, value: unknown): string | null {
   if (!schema) return null;
 
   const r = schema.safeParse(value);
-  return r.success ? null : r.error.issues[0]?.message ?? "invalid value";
+  if (r.success) return null;
+  // zod's SafeParseReturnType isn't a discriminated union in this typings
+  // version, so TS won't narrow to the error branch — reach for `error` directly.
+  return (r as { error: z.ZodError }).error.issues[0]?.message ?? "invalid value";
 }
