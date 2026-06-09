@@ -64,6 +64,7 @@ function resolveOne(id: string): string {
 const ID_KEYS = new Set([
   "nodeId",
   "nodeIds",
+  "root",
   "parentId",
   "targetNodeIds",
   "sourceInstanceId",

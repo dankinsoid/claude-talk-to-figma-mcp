@@ -202,6 +202,8 @@ async function handleCommand(command, params) {
       return await setAnnotation(params);
     case "scan_nodes_by_types":
       return await scanNodesByTypes(params);
+    case "glob_nodes":
+      return await globNodes(params);
     case "set_multiple_annotations":
       return await setMultipleAnnotations(params);
     case "get_instance_overrides":
@@ -2694,6 +2696,78 @@ async function scanNodesByTypes(params) {
     matchingNodes: matchingNodes,
     searchedTypes: types,
   };
+}
+
+// @ai-generated(guided)
+/**
+ * Flat, glob-style index of a subtree. Walks every container under `root`
+ * (so any-depth `**` search) and collects nodes matching an optional type
+ * filter and an optional shell-style name glob.
+ * @param {Object} params
+ * @param {string} [params.root] - Node id to search under; defaults to current page.
+ * @param {string} [params.name] - Name glob (* = any run, ? = one char). Omit = any.
+ * @param {string|string[]} [params.type] - Type filter; a type, an array, or "*"/omit = any.
+ * @param {number} [params.depth] - Max depth below root (direct children = 1). Omit = unlimited.
+ * @returns {Promise<{count:number, matches:Array<{id,name,type}>}>}
+ */
+async function globNodes(params) {
+  const { root, name, type, depth } = params || {};
+
+  let rootNode;
+  if (root) {
+    rootNode = await figma.getNodeByIdAsync(root);
+    if (!rootNode) throw new Error(`Node with ID ${root} not found`);
+  } else {
+    rootNode = figma.currentPage;
+  }
+
+  // Type filter → uppercase Set, or null for "match any".
+  let typeSet = null;
+  if (type && type !== "*") {
+    const arr = Array.isArray(type) ? type : [type];
+    typeSet = new Set(arr.map((t) => String(t).toUpperCase()));
+  }
+
+  const nameRe = name ? globToRegExp(name) : null;
+  const maxDepth = typeof depth === "number" ? depth : Infinity;
+  const matches = [];
+
+  // Descend through every container regardless of whether it matched, so the
+  // search is any-depth; the root itself (d===0) is the container, not a hit.
+  // parentId carries the immediate container id so the flat output can show
+  // each hit's location (@parent) without reconstructing the tree.
+  const walk = (node, d, parentId) => {
+    if (d > 0) {
+      const typeOk = !typeSet || typeSet.has(node.type);
+      const nameOk = !nameRe || nameRe.test(node.name || "");
+      if (typeOk && nameOk) {
+        matches.push({ id: node.id, name: node.name || "", type: node.type, parentId });
+      }
+    }
+    if (d < maxDepth && "children" in node) {
+      for (const child of node.children) walk(child, d + 1, node.id);
+    }
+  };
+  walk(rootNode, 0, null);
+
+  return { count: matches.length, matches };
+}
+
+/**
+ * Translate a shell-style name glob to an anchored, case-insensitive RegExp.
+ * `*` = any run, `?` = one char; every other regex metachar is escaped so
+ * Figma names with (), [], +, ., etc. match literally.
+ * @param {string} glob
+ * @returns {RegExp}
+ */
+function globToRegExp(glob) {
+  let re = "";
+  for (const ch of glob) {
+    if (ch === "*") re += ".*";
+    else if (ch === "?") re += ".";
+    else re += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp("^" + re + "$", "i");
 }
 
 /**

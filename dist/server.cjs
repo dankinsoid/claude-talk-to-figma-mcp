@@ -165,19 +165,8 @@ function axisSize(node, parent, self, dim2, px) {
   }
   return px;
 }
-function padArray(node) {
-  const t = dim(node.paddingTop || 0);
-  const r = dim(node.paddingRight || 0);
-  const b = dim(node.paddingBottom || 0);
-  const l = dim(node.paddingLeft || 0);
-  if (!(t || r || b || l)) return void 0;
-  return [l, t, r, b];
-}
 function autoLayoutOf(node, stack, size) {
   const al = { flow: stack };
-  if (node.itemSpacing) al.gap = dim(node.itemSpacing);
-  const pad = padArray(node);
-  if (pad) al.pad = pad;
   if (node.primaryAxisAlignItems) al.alignMain = node.primaryAxisAlignItems;
   if (node.counterAxisAlignItems) al.alignCross = node.counterAxisAlignItems;
   if (size !== void 0) al.size = size;
@@ -339,6 +328,68 @@ function shapeNode(node, options = {}) {
   return shapeRec(node, opts, 0, null, expand, collapsed, templates, null);
 }
 
+// src/talk_to_figma_mcp/idmap.ts
+var shortToFull = /* @__PURE__ */ new Map();
+var fullToShort = /* @__PURE__ */ new Map();
+var counter = 0;
+var SHORT_RE = /^n\d+$/;
+function shorten(fullId) {
+  if (SHORT_RE.test(fullId)) return fullId;
+  let s = fullToShort.get(fullId);
+  if (!s) {
+    s = "n" + counter++;
+    fullToShort.set(fullId, s);
+    shortToFull.set(s, fullId);
+  }
+  return s;
+}
+function renumberIds(node) {
+  if (Array.isArray(node)) {
+    node.forEach(renumberIds);
+    return node;
+  }
+  if (node && typeof node === "object") {
+    const o = node;
+    if (typeof o.id === "string") o.id = shorten(o.id);
+    for (const k in o) {
+      if (o[k] && typeof o[k] === "object") renumberIds(o[k]);
+    }
+    return node;
+  }
+  return node;
+}
+function resolveOne(id) {
+  if (!SHORT_RE.test(id)) return id;
+  const full = shortToFull.get(id);
+  if (!full) {
+    throw new Error(
+      `Unknown short id "${id}" \u2014 re-fetch the node; short ids reset when the MCP server restarts.`
+    );
+  }
+  return full;
+}
+var ID_KEYS = /* @__PURE__ */ new Set([
+  "nodeId",
+  "nodeIds",
+  "root",
+  "parentId",
+  "targetNodeIds",
+  "sourceInstanceId",
+  "componentId",
+  "startNodeId",
+  "endNodeId",
+  "connectorId"
+]);
+function resolveShortIdsInParams(value, key = "") {
+  if (Array.isArray(value)) return value.map((v) => resolveShortIdsInParams(v, key));
+  if (value && typeof value === "object") {
+    for (const k in value) value[k] = resolveShortIdsInParams(value[k], k);
+    return value;
+  }
+  if (typeof value === "string" && ID_KEYS.has(key)) return resolveOne(value);
+  return value;
+}
+
 // src/talk_to_figma_mcp/server.ts
 var logger = {
   info: (message) => process.stderr.write(`[INFO] ${message}
@@ -399,6 +450,23 @@ async function jsonContent(payload, save, baseName) {
   }
   return { type: "text", text };
 }
+async function textContent(text, summary, save, baseName) {
+  if (save?.saveToFile || save?.outputPath) {
+    const { path, bytes } = await writeOutputFile(baseName, "txt", text, save.outputPath);
+    return { type: "text", text: `Saved ${bytes} bytes (${summary}) to ${path}` };
+  }
+  if (Buffer.byteLength(text) > AUTO_SAVE_BYTES) {
+    try {
+      const { path, bytes } = await writeOutputFile(baseName, "txt", text);
+      return {
+        type: "text",
+        text: `Output too large to return inline (${bytes} bytes, ${summary}); saved to ${path}. Read it from there, or narrow with type/name/depth.`
+      };
+    } catch {
+    }
+  }
+  return { type: "text", text };
+}
 server.tool(
   "get_document_info",
   "Get detailed information about the current Figma document",
@@ -429,7 +497,7 @@ server.tool(
     try {
       const result = await sendCommandToFigma("get_selection");
       return {
-        content: [await jsonContent(result, { saveToFile, outputPath }, "selection")]
+        content: [await jsonContent(renumberIds(result), { saveToFile, outputPath }, "selection")]
       };
     } catch (error) {
       return {
@@ -460,7 +528,7 @@ server.tool(
     try {
       const opts = { depth, collapseIcons, collapseRepeats, cull };
       const result = await sendCommandToFigma("read_my_design", {});
-      const shaped = Array.isArray(result) ? result.map((r) => r && r.document ? { ...r, document: shapeNode(r.document, opts) } : r) : result;
+      const shaped = Array.isArray(result) ? result.map((r) => r && r.document ? { ...r, document: renumberIds(shapeNode(r.document, opts)) } : r) : result;
       return {
         content: [await jsonContent(shaped, { saveToFile, outputPath }, "my-design")]
       };
@@ -478,7 +546,7 @@ server.tool(
 );
 server.tool(
   "get_node_info",
-  "Get information about a specific node in Figma, compacted for low token cost. Returns a fixed minimal field set per node (id, name, type, color/gradient, opacity, box or autoLayout, text); children expand to depth 6 by default \u2014 raise depth or re-request a stub's id to zoom in.",
+  "Get information about a specific node in Figma, compacted for low token cost. Returns a fixed minimal field set per node (id, name, type, color/gradient, opacity, box or autoLayout, text); children expand to depth 6 by default \u2014 raise depth or re-request a stub's id to zoom in. Node ids are short counters (n0, n1, ...) standing in for canonical Figma ids; pass them to any tool (read, edit, or get_node_info_raw).",
   {
     nodeId: import_zod.z.string().describe("The ID of the node to get information about"),
     ...shapeParams,
@@ -487,7 +555,7 @@ server.tool(
   async ({ nodeId, depth, collapseIcons, collapseRepeats, cull, saveToFile, outputPath }) => {
     try {
       const result = await sendCommandToFigma("get_node_info", { nodeId });
-      const shaped = shapeNode(result, { depth, collapseIcons, collapseRepeats, cull });
+      const shaped = renumberIds(shapeNode(result, { depth, collapseIcons, collapseRepeats, cull }));
       return {
         content: [await jsonContent(shaped, { saveToFile, outputPath }, "node-info")]
       };
@@ -505,7 +573,7 @@ server.tool(
 );
 server.tool(
   "get_node_info_raw",
-  "Get the full, unfiltered JSON of a single node exactly as Figma serializes it (JSON_REST_V1), with all properties but with the children array stripped. Use when get_node_info's compacted view drops a property you need; large outputs auto-spill to a file.",
+  "Get the full, unfiltered JSON of a single node exactly as Figma serializes it (JSON_REST_V1), with all properties but with the children array stripped. Use when get_node_info's compacted view drops a property you need; large outputs auto-spill to a file. Accepts the short ids (n0, n1, ...) from compact output. Returns {requestedId, node}: requestedId echoes the id you passed, node carries the raw JSON with canonical Figma ids.",
   {
     nodeId: import_zod.z.string().describe("The ID of the node to get the raw JSON for"),
     ...saveParams
@@ -513,8 +581,9 @@ server.tool(
   async ({ nodeId, saveToFile, outputPath }) => {
     try {
       const result = await sendCommandToFigma("get_node_info_raw", { nodeId });
+      const wrapped = { requestedId: nodeId, node: result };
       return {
-        content: [await jsonContent(result, { saveToFile, outputPath }, "node-info-raw")]
+        content: [await jsonContent(wrapped, { saveToFile, outputPath }, "node-info-raw")]
       };
     } catch (error) {
       return {
@@ -522,6 +591,40 @@ server.tool(
           {
             type: "text",
             text: `Error getting raw node info: ${error instanceof Error ? error.message : String(error)}`
+          }
+        ]
+      };
+    }
+  }
+);
+server.tool(
+  "glob_nodes",
+  'List nodes under a root by type and/or name glob, one per line as `id:"name".TYPE @parent` \u2014 a flat, grep-friendly index of a subtree (the Figma analog of glob / `ls -R`). The trailing `@parent` is the immediate container\'s short id, giving each hit a location without drawing the tree; pass it to get_node_info to see surroundings. Filters: `type` (a node type, an array of them, or "*"/omit for any) and `name` (a shell-style glob over the node\'s OWN name: `*` = any run, `?` = one char; omit for any). Matches names only, not paths \u2014 Figma names contain slashes. `root` is the node id to search under (default: current page); descends through every container regardless of match (any-depth search), with `depth` capping how deep. Ids (including `@parent`) are short counters (n0, n1, ...) \u2014 feed any straight into read/edit tools.',
+  {
+    root: import_zod.z.string().optional().describe("Node id to search under. Defaults to the current page. Accepts short ids (n0, ...)."),
+    name: import_zod.z.string().optional().describe("Shell-style glob matched against each node's own name (* = any run, ? = one char). Case-insensitive. Omit to match any name."),
+    type: import_zod.z.union([import_zod.z.string(), import_zod.z.array(import_zod.z.string())]).optional().describe('Node type filter: a single type (e.g. "TEXT"), an array (["TEXT","INSTANCE"]), or "*"/omit for any. Case-insensitive.'),
+    depth: import_zod.z.number().optional().describe("Max depth below root to descend (root's direct children = 1). Omit for unlimited."),
+    ...saveParams
+  },
+  async ({ root, name, type, depth, saveToFile, outputPath }) => {
+    try {
+      const result = await sendCommandToFigma("glob_nodes", { root, name, type, depth });
+      const matches = renumberIds(result?.matches || []);
+      const lines = matches.map((m) => {
+        const parent = m.parentId ? renumberIds({ id: m.parentId }).id : null;
+        return `${m.id}:${JSON.stringify(m.name)}.${m.type}${parent ? ` @${parent}` : ""}`;
+      }).join("\n");
+      const text = lines || "(no matches)";
+      return {
+        content: [await textContent(text, `${matches.length} nodes`, { saveToFile, outputPath }, "glob")]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error globbing nodes: ${error instanceof Error ? error.message : String(error)}`
           }
         ]
       };
@@ -545,7 +648,7 @@ server.tool(
           return { nodeId, info: result };
         })
       );
-      const shaped = results.map((result) => shapeNode(result.info, opts));
+      const shaped = renumberIds(results.map((result) => shapeNode(result.info, opts)));
       return {
         content: [await jsonContent(shaped, { saveToFile, outputPath }, "nodes-info")]
       };
@@ -2605,6 +2708,12 @@ function sendCommandToFigma(command, params = {}, timeoutMs = 3e4) {
     const requiresChannel = command !== "join";
     if (requiresChannel && !currentChannel) {
       reject(new Error("Must join a channel before sending commands"));
+      return;
+    }
+    try {
+      params = resolveShortIdsInParams(params);
+    } catch (err) {
+      reject(err instanceof Error ? err : new Error(String(err)));
       return;
     }
     const id = (0, import_uuid.v4)();

@@ -156,6 +156,27 @@ async function jsonContent(payload: any, save: SaveArgs, baseName: string) {
   return { type: "text" as const, text };
 }
 
+// Render a plain-text payload (e.g. glob lines) inline, or spill to a file when
+// requested or oversized — mirroring jsonContent but without JSON encoding.
+async function textContent(text: string, summary: string, save: SaveArgs, baseName: string) {
+  if (save?.saveToFile || save?.outputPath) {
+    const { path, bytes } = await writeOutputFile(baseName, "txt", text, save.outputPath);
+    return { type: "text" as const, text: `Saved ${bytes} bytes (${summary}) to ${path}` };
+  }
+  if (Buffer.byteLength(text) > AUTO_SAVE_BYTES) {
+    try {
+      const { path, bytes } = await writeOutputFile(baseName, "txt", text);
+      return {
+        type: "text" as const,
+        text: `Output too large to return inline (${bytes} bytes, ${summary}); saved to ${path}. Read it from there, or narrow with type/name/depth.`,
+      };
+    } catch {
+      // Write failed — return inline rather than nothing.
+    }
+  }
+  return { type: "text" as const, text };
+}
+
 // Document Info Tool
 server.tool(
   "get_document_info",
@@ -324,6 +345,58 @@ server.tool(
             type: "text",
             text: `Error getting raw node info: ${error instanceof Error ? error.message : String(error)
               }`,
+          },
+        ],
+      };
+    }
+  }
+);
+
+// Glob Tool — flat, grep-friendly index of a subtree
+server.tool(
+  "glob_nodes",
+  "List nodes under a root by type and/or name glob, one per line as `id:\"name\".TYPE @parent` — a flat, grep-friendly index of a subtree (the Figma analog of glob / `ls -R`). The trailing `@parent` is the immediate container's short id, giving each hit a location without drawing the tree; pass it to get_node_info to see surroundings. Filters: `type` (a node type, an array of them, or \"*\"/omit for any) and `name` (a shell-style glob over the node's OWN name: `*` = any run, `?` = one char; omit for any). Matches names only, not paths — Figma names contain slashes. `root` is the node id to search under (default: current page); descends through every container regardless of match (any-depth search), with `depth` capping how deep. Ids (including `@parent`) are short counters (n0, n1, ...) — feed any straight into read/edit tools.",
+  {
+    root: z
+      .string()
+      .optional()
+      .describe("Node id to search under. Defaults to the current page. Accepts short ids (n0, ...)."),
+    name: z
+      .string()
+      .optional()
+      .describe("Shell-style glob matched against each node's own name (* = any run, ? = one char). Case-insensitive. Omit to match any name."),
+    type: z
+      .union([z.string(), z.array(z.string())])
+      .optional()
+      .describe("Node type filter: a single type (e.g. \"TEXT\"), an array ([\"TEXT\",\"INSTANCE\"]), or \"*\"/omit for any. Case-insensitive."),
+    depth: z
+      .number()
+      .optional()
+      .describe("Max depth below root to descend (root's direct children = 1). Omit for unlimited."),
+    ...saveParams,
+  },
+  async ({ root, name, type, depth, saveToFile, outputPath }: any) => {
+    try {
+      const result: any = await sendCommandToFigma("glob_nodes", { root, name, type, depth });
+      // renumberIds shortens each match's `id`; parentId shares the same map, so
+      // a hit and its parent get the same short id (idempotent shortening).
+      const matches = renumberIds(result?.matches || []);
+      const lines = matches
+        .map((m: any) => {
+          const parent = m.parentId ? renumberIds({ id: m.parentId }).id : null;
+          return `${m.id}:${JSON.stringify(m.name)}.${m.type}${parent ? ` @${parent}` : ""}`;
+        })
+        .join("\n");
+      const text = lines || "(no matches)";
+      return {
+        content: [await textContent(text, `${matches.length} nodes`, { saveToFile, outputPath }, "glob")],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error globbing nodes: ${error instanceof Error ? error.message : String(error)}`,
           },
         ],
       };
@@ -2750,6 +2823,7 @@ type FigmaCommand =
   | "set_annotation"
   | "set_multiple_annotations"
   | "scan_nodes_by_types"
+  | "glob_nodes"
   | "set_layout_mode"
   | "set_padding"
   | "set_axis_align"
