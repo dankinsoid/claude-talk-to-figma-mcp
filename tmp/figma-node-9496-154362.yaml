@@ -133,7 +133,7 @@ children:
                           - id: "I9496:154363;3063:34762;3063:40330;3063:40207;3058:18083"
                             name: icon
                             type: frame
-                            color: "#ffffff"     # white @ 30%
+                            color: "#ffffff4d"
                             autoLayout:
                               - size: [70, 70]
                             children:
@@ -309,7 +309,7 @@ children:
           - id: "I9496:154363;3063:35225"
             name: Buttons
             type: instance
-            color: "#bcbcbc"     # @ 10%
+            color: "#bcbcbc1a"
             autoLayout:
               - alignment: center
                 flow: vertical
@@ -326,7 +326,7 @@ children:
           - id: "I9496:154363;8782:275409"
             name: Buttons
             type: instance
-            color: "#bcbcbc"     # @ 10%; gradient stroke
+            color: "#bcbcbc1a"     #; gradient stroke
             text: All-in-One Player    # collapsed
             size: [122, 32]
       - id: "I9496:154363;9315:162569"
@@ -446,13 +446,13 @@ children:
                                   - id: "I9496:154364;3064:24641;3064:21534;8267:107128"
                                     name: Added
                                     type: text
-                                    color: "#ffffff"     # @ 50%
+                                    color: "#ffffff80"
                                     text: in Apple
                                     size: [32, 10]
                                   - id: "I9496:154364;3064:24641;3064:21534;8267:107129"
                                     name: Found
                                     type: text
-                                    color: "#ffffff"     # @ 70%
+                                    color: "#ffffffb3"
                                     text: found
                                     size: [23, 10]
                                   - id: "I9496:154364;3064:24641;3064:21534;8267:107130"
@@ -472,13 +472,13 @@ children:
                                   - id: "I9496:154364;3064:24641;3064:21534;3064:22050"
                                     name: NUM – In first servic
                                     type: text
-                                    color: "#ffffff"     # @ 50%
+                                    color: "#ffffff80"
                                     text: "1100"
                                     size: [39, 19]
                                   - id: "I9496:154364;3064:24641;3064:21534;8267:101583"
                                     name: NUM – Found
                                     type: text
-                                    color: "#ffffff"     # @ 70%
+                                    color: "#ffffffb3"
                                     text: "/ 30"
                                     size: [32, 19]
                                   - id: "I9496:154364;3064:24641;3064:21534;3064:69461"
@@ -511,12 +511,12 @@ children:
                                   - id: "I9496:154364;3064:24641;3064:21534;3198:33293"
                                     name: Buttons
                                     type: instance
-                                    color: "#bcbcbc"     # @ 10%
+                                    color: "#bcbcbc1a"
                                     size: [92, 32]
                                   - id: "I9496:154364;3064:24641;3064:21534;3198:33702"
                                     name: Buttons
                                     type: instance
-                                    color: "#bcbcbc"     # @ 10%
+                                    color: "#bcbcbc1a"
                                     text: Select        # collapsed
                                     size: [58, 32]
                   - id: "I9496:154364;3064:24641;3064:52062"
@@ -531,7 +531,7 @@ children:
                       - id: "I9496:154364;3064:24641;3064:52062;3064:71724"
                         name: description
                         type: text
-                        color: "#ffffff"     # @ 80%
+                        color: "#ffffffcc"
                         text: Stay tuned, we're finding the best matches...
                         size: [174, 10]
                       - id: "I9496:154364;3064:24641;3064:52062;3051:19519"
@@ -575,7 +575,7 @@ children:
                           - id: "I9496:154364;3064:72354;3034:17502;3034:17493"
                             name: Cover
                             type: frame
-                            color: "#ffffff"     # @ 10%
+                            color: "#ffffff1a"
                             size: [80, 80]
                           - id: "I9496:154364;3064:72354;3034:17502;3034:17496"
                             name: AlbumName
@@ -602,7 +602,7 @@ children:
                               - id: "I9496:154364;3064:72354;3034:17879;8266:76104"
                                 name: overlay
                                 type: rectangle
-                                color: "#000000"     # @ 50%
+                                color: "#00000080"
                                 box: [112, 168, 80, 80]
                               - id: "I9496:154364;3064:72354;3034:17879;8266:76046"
                                 name: added
@@ -613,7 +613,7 @@ children:
                               - id: "I9496:154364;3064:72354;3034:17879;8266:78688"
                                 name: amount
                                 type: text
-                                color: "#ffffff"     # @ 50%
+                                color: "#ffffff80"
                                 text: "22"
                                 box: [169, 226, 15, 14]
                           - id: "I9496:154364;3064:72354;3034:17879;3942:43973"
@@ -633,7 +633,7 @@ children:
                               - id: "I9496:154364;3064:72354;3034:17879;3942:43975"
                                 name: Artist
                                 type: text
-                                color: "#ffffff"     # @ 50%
+                                color: "#ffffff80"
                                 text: Dua Lipa, M..
                                 size: [fill, 18]
                       - id: "I9496:154364;3064:72354;3064:72134"
@@ -689,7 +689,7 @@ children:
                           - id: "I9496:154364;3064:44662;3032:15920;3062:21146"
                             name: Track cover
                             type: frame
-                            color: "#ffffff"     # @ 10%
+                            color: "#ffffff1a"
                             size: [48, 48]
                           - id: "I9496:154364;3064:44662;3032:15920;3032:15433"
                             name: track
@@ -727,7 +727,7 @@ children:
                               - id: "I9496:154364;3064:44662;3032:15933;3064:58338"
                                 name: Blacl_50%
                                 type: rectangle
-                                color: "#000000"     # @ 50%
+                                color: "#00000080"
                                 box: [16, 384, 48, 48]
                               - id: "I9496:154364;3064:44662;3032:15933;3062:19312"
                                 name: Icon_48
@@ -759,7 +759,7 @@ children:
                                   - id: "I9496:154364;3064:44662;3032:15933;3032:15378"
                                     name: artist
                                     type: text
-                                    color: "#ffffff"     # @ 50%
+                                    color: "#ffffff80"
                                     text: Olivia Rodrigo
                                     size: [fill, 14]
                               - id: "I9496:154364;3064:44662;3032:15933;3032:15379"
@@ -780,7 +780,7 @@ children:
                                   - id: "I9496:154364;3064:44662;3032:15933;8266:43608"
                                     name: duration
                                     type: text
-                                    color: "#ffffff"     # @ 50%
+                                    color: "#ffffff80"
                                     text: "2:01"
                                     size: [24, 14]
                       - id: "I9496:154364;3064:44662;3032:15933;3032:15382"
@@ -820,7 +820,7 @@ children:
                               - id: "I9496:154364;3064:44662;3032:15966;3941:44400"
                                 name: Blacl_50%
                                 type: rectangle
-                                color: "#000000"     # @ 50%
+                                color: "#00000080"
                                 box: [16, 513, 48, 48]
                               - id: "I9496:154364;3064:44662;3032:15966;3941:44401"
                                 name: Icon_48
@@ -852,7 +852,7 @@ children:
                                   - id: "I9496:154364;3064:44662;3032:15966;3941:44405"
                                     name: artist
                                     type: text
-                                    color: "#ffffff"     # @ 50%
+                                    color: "#ffffff80"
                                     text: The Weeknd
                                     size: [fill, 14]
                               - id: "I9496:154364;3064:44662;3032:15966;3941:44406"
@@ -867,7 +867,7 @@ children:
                                   - id: "I9496:154364;3064:44662;3032:15966;3941:44408"
                                     name: duration
                                     type: text
-                                    color: "#ffffff"     # @ 50%
+                                    color: "#ffffff80"
                                     text: "2:51"
                                     size: [25, 14]
                       - id: "I9496:154364;3064:44662;3032:15966;3941:44409"
@@ -929,7 +929,7 @@ children:
           - id: "I9496:154364;3173:41084;11738:59804"
             name: Frame 277
             type: instance
-            color: "#ffffff"     # @ 10%
+            color: "#ffffff1a"
             autoLayout:
               - alignment: center
                 flow: horizontal
@@ -986,7 +986,7 @@ children:
               - id: "I9496:154364;3173:41084;11738:59804;11820:102320"
                 name: Buttons
                 type: instance
-                color: "#bcbcbc"     # @ 10%
+                color: "#bcbcbc1a"
                 autoLayout:
                   - alignment: center
                     flow: vertical
@@ -1008,7 +1008,7 @@ children:
           - id: "I9496:154364;3173:41084;9479:195269"
             name: Transfer Button
             type: instance
-            color: "#ffffff"     # @ 70%
+            color: "#ffffffb3"
             autoLayout:
               - alignment: center
                 flow: horizontal
