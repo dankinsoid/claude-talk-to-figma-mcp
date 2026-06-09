@@ -1712,6 +1712,42 @@ server.tool(
   }
 );
 server.tool(
+  "reparent_nodes",
+  "Move existing nodes to a new parent and/or a new z-order position \u2014 the structural move that edit_nodes can't do (it only writes value properties, never `parent`/`index`). Pass `moves`: an array of `{nodeId, parentId?, index?}`. `parentId` re-parents the node into that container (a FRAME, GROUP, SECTION, COMPONENT, or a page; short ids n0,... or full Figma ids). `index` sets the node's slot among its siblings \u2014 0 is the bottom of the z-order / first in an auto-layout, larger is later; an out-of-range index pins to the end. Give `parentId` to move into a different container, `index` alone to REORDER within the current parent, or both. Moves are INDEPENDENT: one failing \u2014 node/parent not found, a parent that can't hold children, moving a node into its own descendant (Figma rejects) \u2014 records its error and the rest still run. Note: re-parenting keeps the node's LOCAL x/y, so its absolute position shifts when the new parent is elsewhere (use edit_nodes to set x/y after); inside an auto-layout parent x/y is ignored and `index` controls the layout order. The result lists each move as `\u2713 id \"name\": parent#oldIndex \u2192 parent#newIndex` or `\u2717 id: <error>`.",
+  {
+    moves: import_zod4.z.array(
+      import_zod4.z.object({
+        nodeId: import_zod4.z.string().describe("Node to move. Short ids (n0, ...) or full Figma ids."),
+        parentId: import_zod4.z.string().optional().describe("New parent container. Omit to reorder within the current parent. Short ids (n0, ...) or full Figma ids."),
+        index: import_zod4.z.number().int().optional().describe("Position among siblings (0 = bottom/first). Omit to append. Out-of-range pins to the end.")
+      })
+    ).min(1).describe("Moves applied in order; each independent \u2014 one failing does not abort the rest.")
+  },
+  async ({ moves }) => {
+    try {
+      const result = await sendCommandToFigma("reparent_nodes", { moves });
+      const rows = (result?.results || []).map((r) => {
+        const id = renumberIds({ id: r.nodeId }).id;
+        if (!r.ok) return `\u2717 ${id}: ${r.error}`;
+        const oldP = r.oldParentId ? renumberIds({ id: r.oldParentId }).id : "?";
+        const newP = r.newParentId ? renumberIds({ id: r.newParentId }).id : "?";
+        return `\u2713 ${id} "${r.name}": ${oldP}#${r.oldIndex} \u2192 ${newP}#${r.newIndex}`;
+      });
+      const text = `moved ${result?.applied || 0}/${moves.length}` + (rows.length ? "\n" + rows.join("\n") : "");
+      return { content: [{ type: "text", text }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error reparenting nodes: ${error instanceof Error ? error.message : String(error)}`
+          }
+        ]
+      };
+    }
+  }
+);
+server.tool(
   "write_nodes",
   'Create new nodes from raw Figma JSON \u2014 the create-side twin of edit_nodes, a Write tool for the node tree instead of text. Pass `nodes`: an array of node specs. Each spec is `{type, ...props, children?}`: `type` is the Figma node type to create (RECTANGLE, FRAME, TEXT, ELLIPSE, LINE, STAR, POLYGON, VECTOR, COMPONENT, SECTION, SLICE, or INSTANCE). Every OTHER key is a property written onto the new node exactly as edit_nodes writes a path \u2014 `name`, `x`, `y`, `cornerRadius`, `opacity`, `fills`, `layoutMode`, `paddingTop`, `itemSpacing`, etc. Values follow edit_nodes rules: any `color` field given as `#RRGGBB` is converted to Figma\'s rgb 0-1 (so `fills:[{type:"SOLID",color:"#3366ff"}]` works), `width`/`height` route through resize(), and on a TEXT node `characters` loads the node\'s font for you. Placement: `parentId` appends the node into an existing container (short ids n0,... or full Figma ids; default is the current page) and `index` sets its position among siblings. `children` is an array of the same spec shape, created recursively inside this node \u2014 this is how you write a whole subtree (frame \u2192 its rows \u2192 their text) in one call. Specs are INDEPENDENT like edit_nodes: a spec whose factory or parent lookup fails records its Figma error and the siblings still create; within a created node, a single bad property (e.g. padding with no layoutMode, a value Figma rejects) is reported per-property and the node still survives with its other props. INSTANCE needs `componentId` (a local COMPONENT, from get_local_components) or `componentKey` (a published library component). IMAGE fills: put `{type:"IMAGE", imageUrl:"https://\u2026", scaleMode:"FILL"}` in `fills` \u2014 the server fetches the URL and imports the bytes into Figma for you (no imageHash needed); same works in edit_nodes when you set a node\'s `fills`. SVG: `type:"SVG"` with `svg:"<svg\u2026>"` raw markup or `svgUrl:"https://\u2026"` (fetched server-side) creates a vector node from the SVG. The result is a tree of `\u2713 <id> <TYPE> "<name>"` (use that id as a parentId or in edit_nodes next) or `\u2717 <error>`, with `! key: <error>` lines for any rejected properties. Large batches stream progress so a long run won\'t time out.',
   {
@@ -2186,7 +2222,7 @@ server.prompt(
 1. Orient \u2014 glob_nodes({ root, type }) for a flat \`id:"name".TYPE @parent\` index of a page or subtree (the \`ls -R\`). Start here when you don't yet know the ids. Filter by \`type\` to cut noise (e.g. type:["SECTION","FRAME"] for the screen map).
 2. Locate \u2014 grep_nodes (regex over TEXT content, the \`grep\`) to find nodes by what they say, or query_nodes (predicates over node fields \u2014 fontSize<12, fills bound to a variable, etc.) to find by structure. All return short ids.
 3. Inspect \u2014 read_node({ nodeIds }) for the compact subtree of just the nodes you'll act on; raise \`depth\` or re-request a stub id to zoom; raw:true for every prop of one node.
-4. Modify \u2014 edit_nodes({ edits:[{nodeId, path, old?, new}] }) to write properties (text via the "characters" path). Pass \`old\` as a guard so you never overwrite a stale read.
+4. Modify \u2014 edit_nodes({ edits:[{nodeId, path, old?, new}] }) to write properties (text via the "characters" path). Pass \`old\` as a guard so you never overwrite a stale read. To MOVE a node \u2014 change its parent or its z-order/layout position \u2014 use reparent_nodes({ moves:[{nodeId, parentId?, index?}] }); edit_nodes can't write structure.
 
 ## Notes
 - No selection and no ids? read_node() with no args reads the current selection; if it's empty, ask the user to select, or glob_nodes the page.

@@ -732,6 +732,57 @@ server.tool(
   }
 );
 
+// Reparent Nodes Tool — move existing nodes between parents / reorder z-order
+// @ai-generated(solo)
+server.tool(
+  "reparent_nodes",
+  "Move existing nodes to a new parent and/or a new z-order position — the structural move that edit_nodes can't do (it only writes value properties, never `parent`/`index`). Pass `moves`: an array of `{nodeId, parentId?, index?}`. `parentId` re-parents the node into that container (a FRAME, GROUP, SECTION, COMPONENT, or a page; short ids n0,... or full Figma ids). `index` sets the node's slot among its siblings — 0 is the bottom of the z-order / first in an auto-layout, larger is later; an out-of-range index pins to the end. Give `parentId` to move into a different container, `index` alone to REORDER within the current parent, or both. Moves are INDEPENDENT: one failing — node/parent not found, a parent that can't hold children, moving a node into its own descendant (Figma rejects) — records its error and the rest still run. Note: re-parenting keeps the node's LOCAL x/y, so its absolute position shifts when the new parent is elsewhere (use edit_nodes to set x/y after); inside an auto-layout parent x/y is ignored and `index` controls the layout order. The result lists each move as `✓ id \"name\": parent#oldIndex → parent#newIndex` or `✗ id: <error>`.",
+  {
+    moves: z
+      .array(
+        z.object({
+          nodeId: z
+            .string()
+            .describe("Node to move. Short ids (n0, ...) or full Figma ids."),
+          parentId: z
+            .string()
+            .optional()
+            .describe("New parent container. Omit to reorder within the current parent. Short ids (n0, ...) or full Figma ids."),
+          index: z
+            .number()
+            .int()
+            .optional()
+            .describe("Position among siblings (0 = bottom/first). Omit to append. Out-of-range pins to the end."),
+        })
+      )
+      .min(1)
+      .describe("Moves applied in order; each independent — one failing does not abort the rest."),
+  },
+  async ({ moves }: any) => {
+    try {
+      const result: any = await sendCommandToFigma("reparent_nodes", { moves });
+      const rows = (result?.results || []).map((r: any) => {
+        const id = renumberIds({ id: r.nodeId }).id;
+        if (!r.ok) return `✗ ${id}: ${r.error}`;
+        const oldP = r.oldParentId ? renumberIds({ id: r.oldParentId }).id : "?";
+        const newP = r.newParentId ? renumberIds({ id: r.newParentId }).id : "?";
+        return `✓ ${id} "${r.name}": ${oldP}#${r.oldIndex} → ${newP}#${r.newIndex}`;
+      });
+      const text = `moved ${result?.applied || 0}/${moves.length}` + (rows.length ? "\n" + rows.join("\n") : "");
+      return { content: [{ type: "text", text }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error reparenting nodes: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
 
 // Write Nodes Tool — the create-side twin of edit_nodes
 // @ai-generated(solo)
@@ -1291,7 +1342,7 @@ server.prompt(
 1. Orient — glob_nodes({ root, type }) for a flat \`id:"name".TYPE @parent\` index of a page or subtree (the \`ls -R\`). Start here when you don't yet know the ids. Filter by \`type\` to cut noise (e.g. type:["SECTION","FRAME"] for the screen map).
 2. Locate — grep_nodes (regex over TEXT content, the \`grep\`) to find nodes by what they say, or query_nodes (predicates over node fields — fontSize<12, fills bound to a variable, etc.) to find by structure. All return short ids.
 3. Inspect — read_node({ nodeIds }) for the compact subtree of just the nodes you'll act on; raise \`depth\` or re-request a stub id to zoom; raw:true for every prop of one node.
-4. Modify — edit_nodes({ edits:[{nodeId, path, old?, new}] }) to write properties (text via the "characters" path). Pass \`old\` as a guard so you never overwrite a stale read.
+4. Modify — edit_nodes({ edits:[{nodeId, path, old?, new}] }) to write properties (text via the "characters" path). Pass \`old\` as a guard so you never overwrite a stale read. To MOVE a node — change its parent or its z-order/layout position — use reparent_nodes({ moves:[{nodeId, parentId?, index?}] }); edit_nodes can't write structure.
 
 ## Notes
 - No selection and no ids? read_node() with no args reads the current selection; if it's empty, ask the user to select, or glob_nodes the page.
@@ -2332,6 +2383,7 @@ type FigmaCommand =
   | "grep_nodes"
   | "query_nodes"
   | "edit_nodes"
+  | "reparent_nodes"
   | "get_reactions"
   | "set_reactions"
   | "set_default_connector"
@@ -2426,6 +2478,9 @@ type CommandParams = {
     within?: { x: number; y: number; width: number; height: number };
     bbox?: boolean;
     maxMatches?: number;
+  };
+  reparent_nodes: {
+    moves: Array<{ nodeId: string; parentId?: string; index?: number }>;
   };
   get_reactions: { nodeIds: string[] };
   set_reactions: {

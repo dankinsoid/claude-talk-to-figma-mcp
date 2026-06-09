@@ -186,6 +186,8 @@ async function handleCommand(command, params) {
       return await writeNodes(params);
     case "edit_nodes":
       return await editNodes(params);
+    case "reparent_nodes":
+      return await reparentNodes(params);
     case "delete_nodes":
       return await deleteNodes(params);
     case "get_styles":
@@ -2213,6 +2215,89 @@ async function editNodes(params) {
   await progress.done(`Done: ${applied}/${total} applied`);
 
   return { applied, total: edits.length, results };
+}
+
+// reparent_nodes — move existing nodes to a new parent and/or a new z-order
+// position among siblings. edit_nodes deliberately can't write `parent`/`index`
+// (they're structural, not value properties), so this is the only way to move a
+// node after creation. Each move is {nodeId, parentId?, index?}: with parentId
+// the node is appended into that container; with index it's placed at that slot
+// among its siblings (in the new parent, or the current one for a pure reorder).
+// Moves are independent — one failing records its Figma error and the rest run.
+// Reparenting keeps the node's LOCAL x/y, so its absolute position shifts; in an
+// auto-layout parent x/y is ignored and `index` sets the layout order instead.
+// @ai-generated(solo)
+async function reparentNodes(params) {
+  const { moves } = params || {};
+  if (!Array.isArray(moves) || moves.length === 0) {
+    throw new Error("reparent_nodes requires a non-empty `moves` array");
+  }
+
+  const results = [];
+  let applied = 0;
+  const total = moves.length;
+  const progress = makeProgress("reparent_nodes", total, {
+    commandId: params && params.commandId,
+    minItems: 5,
+  });
+  await progress.start(`Moving ${total} nodes...`);
+
+  for (let i = 0; i < moves.length; i++) {
+    const m = moves[i] || {};
+    const r = { nodeId: m.nodeId };
+    try {
+      if (!m.nodeId) throw new Error("move needs a `nodeId`");
+      const hasParent = m.parentId != null && m.parentId !== "";
+      const hasIndex = typeof m.index === "number";
+      if (!hasParent && !hasIndex) throw new Error("move needs `parentId` and/or `index`");
+
+      const node = await figma.getNodeByIdAsync(m.nodeId);
+      if (!node) throw new Error(`node not found: ${m.nodeId}`);
+      if (!node.parent) throw new Error(`${node.type} cannot be reparented (no parent)`);
+
+      const oldParent = node.parent;
+      r.oldParentId = oldParent.id;
+      r.oldIndex = oldParent.children ? oldParent.children.indexOf(node) : null;
+
+      // Target parent: explicit parentId, or the current parent for a pure reorder.
+      let parent = oldParent;
+      if (hasParent) {
+        const p = await figma.getNodeByIdAsync(m.parentId);
+        if (!p) throw new Error(`parent not found: ${m.parentId}`);
+        if (!("appendChild" in p)) throw new Error(`parent ${m.parentId} (${p.type}) cannot have children`);
+        parent = p;
+      }
+
+      if (hasIndex) {
+        // insertChild requires 0 <= index <= children.length; clamp so an
+        // out-of-range index pins to the end instead of throwing. When the node
+        // is already in `parent`, Figma repositions it (the resulting index may
+        // shift as removal compacts the list — we report the real one below).
+        let idx = m.index < 0 ? 0 : m.index;
+        const max = parent.children ? parent.children.length : 0;
+        if (idx > max) idx = max;
+        parent.insertChild(idx, node);
+      } else {
+        parent.appendChild(node); // append into the new parent, keep sibling order
+      }
+
+      r.newParentId = parent.id;
+      r.newIndex = parent.children ? parent.children.indexOf(node) : null;
+      r.name = node.name;
+      r.type = node.type;
+      r.ok = true;
+      applied++;
+    } catch (err) {
+      r.ok = false;
+      r.error = err && err.message ? err.message : String(err);
+    }
+    results.push(r);
+    await progress.tick(i + 1, `Moved ${i + 1}/${total} (${applied} ok)`);
+  }
+
+  await progress.done(`Done: ${applied}/${total} moved`);
+
+  return { applied, total, results };
 }
 
 /**
