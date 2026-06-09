@@ -1716,6 +1716,139 @@ server.tool(
   }
 );
 
+// ---- Variables / design tokens ----
+
+server.tool(
+  "get_variables",
+  "Read local Figma variables (design tokens): every variable collection, its modes, and each variable's per-mode value. Colors come back as hex, and aliases (variables referencing other variables) resolve to {alias: <target name>, aliasId}. Use this to discover token names/ids before binding or updating them. Pass `collection` to filter to one collection by name or id.",
+  {
+    collection: z.string().optional().describe("Limit to a single collection by name or id"),
+  },
+  async ({ collection }: any) => {
+    try {
+      const result: any = await sendCommandToFigma("get_variables", { collection });
+      const cols = result.collections || [];
+      const summary = cols.length
+        ? cols
+            .map(
+              (c: any) =>
+                `• ${c.name} (${c.id}) — modes: ${c.modes.map((m: any) => m.name).join(", ")}; ${c.variableCount} variables`
+            )
+            .join("\n")
+        : "No local variable collections found.";
+      return {
+        content: [
+          { type: "text", text: `${summary}\n\n${JSON.stringify(result, null, 2)}` },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          { type: "text", text: `Error reading variables: ${error instanceof Error ? error.message : String(error)}` },
+        ],
+      };
+    }
+  }
+);
+
+server.tool(
+  "set_variables",
+  "Create or update Figma variables (design tokens), collections, and modes in one call (upsert). Match an existing collection/variable by `id`, or by `name` to update it, or omit both to create. New variables require `type` (COLOR|FLOAT|STRING|BOOLEAN). Set per-mode values via `valuesByMode` keyed by mode name; COLOR accepts hex (\"#RRGGBB\"/\"#RRGGBBAA\") or {r,g,b,a} 0-1. A value of {alias: \"<other variable name>\"} (or {alias id}) makes the variable reference another — aliases resolve after all variables in the batch are created, so forward references within the call work. NOTE: more than one mode per collection requires a paid Figma plan.",
+  {
+    collections: z
+      .array(
+        z.object({
+          id: z.string().optional().describe("Existing collection id to update"),
+          name: z.string().optional().describe("Collection name (used to match or create)"),
+          modes: z
+            .array(z.string())
+            .optional()
+            .describe("Desired mode names; the first becomes the default mode of a new collection"),
+          variables: z
+            .array(
+              z.object({
+                id: z.string().optional().describe("Existing variable id to update"),
+                name: z.string().describe("Variable name; '/' creates token groups (e.g. 'color/bg/primary')"),
+                type: z
+                  .enum(["COLOR", "FLOAT", "STRING", "BOOLEAN"])
+                  .optional()
+                  .describe("Resolved type — required when creating a new variable"),
+                scopes: z.array(z.string()).optional().describe("Variable scopes (e.g. ALL_SCOPES, TEXT_CONTENT, CORNER_RADIUS)"),
+                description: z.string().optional(),
+                valuesByMode: z
+                  .record(z.string(), z.any())
+                  .optional()
+                  .describe("Map of mode name → value (literal hex/number/string/boolean, or {alias: <name>})"),
+              })
+            )
+            .optional(),
+        })
+      )
+      .min(1)
+      .describe("Collections to upsert, each with its modes and variables"),
+  },
+  async ({ collections }: any) => {
+    try {
+      const result: any = await sendCommandToFigma("set_variables", { collections });
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Variables updated: ${result.variablesCreated} created, ${result.variablesUpdated} updated across ${result.collections.length} collection(s).\n\n${JSON.stringify(result, null, 2)}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          { type: "text", text: `Error setting variables: ${error instanceof Error ? error.message : String(error)}` },
+        ],
+      };
+    }
+  }
+);
+
+server.tool(
+  "bind_variables",
+  "Bind a variable (design token) to a node property, or unbind it. Identify the variable by `variableId` (from get_variables) or `variableName`. `field` accepts node properties like width, height, cornerRadius (or per-corner topLeftRadius…), opacity, visible, characters, fontSize, lineHeight, letterSpacing, fontWeight, paragraphSpacing, itemSpacing (alias 'gap'), paddingLeft/Right/Top/Bottom — plus 'fills'/'strokes' to bind the paint color (use `paintIndex`, default 0). Set `unbind: true` to clear a binding.",
+  {
+    bindings: z
+      .array(
+        z.object({
+          nodeId: z.string().describe("Target node id"),
+          field: z.string().describe("Property to bind (e.g. 'fills', 'cornerRadius', 'fontSize', 'itemSpacing')"),
+          variableId: z.string().optional().describe("Variable id to bind"),
+          variableName: z.string().optional().describe("Variable name to bind (used if variableId omitted)"),
+          paintIndex: z.number().optional().describe("For 'fills'/'strokes': which paint to bind (default 0)"),
+          unbind: z.boolean().optional().describe("Clear the binding on this field instead of setting it"),
+        })
+      )
+      .min(1)
+      .describe("Bindings to apply"),
+  },
+  async ({ bindings }: any) => {
+    try {
+      const result: any = await sendCommandToFigma("bind_variables", { bindings });
+      const lines = (result.results || []).map((r: any) =>
+        r.error
+          ? `✗ ${r.nodeId}.${r.field}: ${r.error}`
+          : `${r.bound ? "✓ bound" : "✓ unbound"} ${r.nodeId}.${r.field}${r.variableName ? ` → ${r.variableName}` : ""}`
+      );
+      return {
+        content: [
+          { type: "text", text: `${result.applied}/${result.total} bindings applied.\n${lines.join("\n")}` },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          { type: "text", text: `Error binding variables: ${error instanceof Error ? error.message : String(error)}` },
+        ],
+      };
+    }
+  }
+);
+
 // Strategy for converting Figma prototype reactions to connector lines
 server.prompt(
   "reaction_to_connector_strategy",
@@ -1826,7 +1959,10 @@ type FigmaCommand =
   | "create_connections"
   | "set_focus"
   | "set_selections"
-  | "combine_as_variants";
+  | "combine_as_variants"
+  | "get_variables"
+  | "set_variables"
+  | "bind_variables";
 
 type CommandParams = {
   get_selection: Record<string, never>;
@@ -1930,6 +2066,34 @@ type CommandParams = {
     name?: string;
     parentId?: string;
     rename?: Array<{ nodeId: string; name: string }>;
+  };
+  get_variables: {
+    collection?: string;
+  };
+  set_variables: {
+    collections: Array<{
+      id?: string;
+      name?: string;
+      modes?: string[];
+      variables?: Array<{
+        id?: string;
+        name: string;
+        type?: "COLOR" | "FLOAT" | "STRING" | "BOOLEAN";
+        scopes?: string[];
+        description?: string;
+        valuesByMode?: Record<string, any>;
+      }>;
+    }>;
+  };
+  bind_variables: {
+    bindings: Array<{
+      nodeId: string;
+      field: string;
+      variableId?: string;
+      variableName?: string;
+      paintIndex?: number;
+      unbind?: boolean;
+    }>;
   };
 
 };

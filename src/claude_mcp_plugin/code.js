@@ -266,6 +266,12 @@ async function handleCommand(command, params) {
       return await setSelections(params);
     case "combine_as_variants":
       return await combineAsVariants(params);
+    case "get_variables":
+      return await getVariables(params);
+    case "set_variables":
+      return await setVariables(params);
+    case "bind_variables":
+      return await bindVariables(params);
     default:
       throw new Error(`Unknown command: ${command}`);
   }
@@ -3213,4 +3219,290 @@ async function combineAsVariants(params) {
     variantProperties,
     variantWarning,
   };
+}
+
+// ---- Variables / design tokens ----
+
+/** #RGB / #RGBA / #RRGGBB / #RRGGBBAA → {r,g,b,a} 0-1. null on malformed input. */
+function hexToRgba01(hex) {
+  let h = String(hex).trim().replace(/^#/, "");
+  if (h.length === 3 || h.length === 4) h = h.split("").map((c) => c + c).join("");
+  if (h.length === 6) h += "ff";
+  if (!/^[0-9a-fA-F]{8}$/.test(h)) return null;
+  return {
+    r: parseInt(h.slice(0, 2), 16) / 255,
+    g: parseInt(h.slice(2, 4), 16) / 255,
+    b: parseInt(h.slice(4, 6), 16) / 255,
+    a: parseInt(h.slice(6, 8), 16) / 255,
+  };
+}
+
+/** A user-supplied value that points at another variable rather than a literal. */
+function isAliasInput(v) {
+  return v && typeof v === "object" && (typeof v.alias === "string" || v.type === "VARIABLE_ALIAS");
+}
+
+/** Coerce a literal into a Figma variable value of `type`. Aliases are handled separately. */
+function coerceVariableValue(type, value) {
+  if (type === "COLOR") {
+    if (typeof value === "string") {
+      const c = hexToRgba01(value);
+      if (!c) throw new Error("Invalid color hex: " + value);
+      return c;
+    }
+    if (value && typeof value === "object" && typeof value.r === "number") {
+      return { r: value.r, g: value.g, b: value.b, a: value.a !== undefined ? value.a : 1 };
+    }
+    throw new Error("COLOR value must be a hex string or {r,g,b,a}: " + JSON.stringify(value));
+  }
+  if (type === "FLOAT") {
+    const n = typeof value === "number" ? value : parseFloat(value);
+    if (!isFinite(n)) throw new Error("FLOAT value must be a number: " + JSON.stringify(value));
+    return n;
+  }
+  if (type === "STRING") return String(value);
+  if (type === "BOOLEAN") return Boolean(value);
+  throw new Error("Unknown variable type: " + type);
+}
+
+async function getVariables(params) {
+  const collections = await figma.variables.getLocalVariableCollectionsAsync();
+  const allVars = await figma.variables.getLocalVariablesAsync();
+  const varById = {};
+  for (const v of allVars) varById[v.id] = v;
+
+  // Aliases are stored as {type:'VARIABLE_ALIAS', id}; resolve to the target's name
+  // so the agent reads/round-trips by name instead of opaque ids. Colors → hex.
+  function resolveValue(type, value) {
+    if (value && value.type === "VARIABLE_ALIAS") {
+      const ref = varById[value.id];
+      return { alias: ref ? ref.name : value.id, aliasId: value.id };
+    }
+    if (type === "COLOR" && value && typeof value.r === "number") return rgbaToHex(value);
+    return value;
+  }
+
+  const wanted = params && params.collection ? String(params.collection) : null;
+  return {
+    collections: collections
+      .filter((c) => !wanted || c.id === wanted || c.name === wanted)
+      .map((c) => {
+        const modeName = {};
+        c.modes.forEach((m) => (modeName[m.modeId] = m.name));
+        const variables = c.variableIds
+          .map((id) => varById[id])
+          .filter(Boolean)
+          .map((v) => {
+            const valuesByMode = {};
+            for (const modeId in v.valuesByMode) {
+              valuesByMode[modeName[modeId] || modeId] = resolveValue(v.resolvedType, v.valuesByMode[modeId]);
+            }
+            return {
+              id: v.id,
+              name: v.name,
+              type: v.resolvedType,
+              scopes: v.scopes,
+              description: v.description || undefined,
+              valuesByMode,
+            };
+          });
+        return {
+          id: c.id,
+          name: c.name,
+          defaultModeId: c.defaultModeId,
+          modes: c.modes.map((m) => ({ modeId: m.modeId, name: m.name })),
+          variableCount: variables.length,
+          variables,
+        };
+      }),
+  };
+}
+
+async function setVariables(params) {
+  const input = (params && params.collections) || [];
+  if (!Array.isArray(input) || input.length === 0) {
+    throw new Error("set_variables requires a non-empty `collections` array");
+  }
+
+  const existingCollections = await figma.variables.getLocalVariableCollectionsAsync();
+  const existingVars = await figma.variables.getLocalVariablesAsync();
+
+  // Variable names are unique within a collection, not globally — key alias lookups
+  // by collectionId+name, with a bare-name fallback for cross-collection refs.
+  const varByKey = {};
+  const varByName = {};
+  for (const v of existingVars) {
+    varByKey[v.variableCollectionId + " " + v.name] = v;
+    varByName[v.name] = v;
+  }
+
+  const result = { collections: [], variablesCreated: 0, variablesUpdated: 0 };
+  // Aliases resolve in a second pass so a token can reference one created later in the batch.
+  const pendingAliases = [];
+
+  for (const cs of input) {
+    let collection = null;
+    if (cs.id) {
+      collection = existingCollections.find((c) => c.id === cs.id) ||
+        (await figma.variables.getVariableCollectionByIdAsync(cs.id));
+      if (!collection) throw new Error("Collection not found: " + cs.id);
+    } else if (cs.name) {
+      collection = existingCollections.find((c) => c.name === cs.name) || null;
+    }
+
+    let createdCollection = false;
+    if (!collection) {
+      if (!cs.name) throw new Error("Each collection needs `name` or `id`");
+      collection = figma.variables.createVariableCollection(cs.name);
+      createdCollection = true;
+      existingCollections.push(collection);
+    } else if (cs.name && collection.name !== cs.name) {
+      collection.name = cs.name;
+    }
+
+    const modeIdByName = {};
+    collection.modes.forEach((m) => (modeIdByName[m.name] = m.modeId));
+    if (Array.isArray(cs.modes) && cs.modes.length) {
+      // A fresh collection always has one default mode ("Mode 1") — repurpose it as
+      // the first requested mode instead of leaving a stray mode behind.
+      if (createdCollection) {
+        const first = collection.modes[0];
+        collection.renameMode(first.modeId, cs.modes[0]);
+        delete modeIdByName[first.name];
+        modeIdByName[cs.modes[0]] = first.modeId;
+      }
+      for (const mname of cs.modes) {
+        if (modeIdByName[mname]) continue;
+        try {
+          modeIdByName[mname] = collection.addMode(mname);
+        } catch (e) {
+          throw new Error(
+            'Cannot add mode "' + mname + '" to "' + collection.name + '": ' +
+            (e && e.message ? e.message : String(e)) +
+            " (more than one mode per collection requires a paid Figma plan)"
+          );
+        }
+      }
+    }
+
+    const varsOut = [];
+    for (const vi of cs.variables || []) {
+      let variable = null;
+      if (vi.id) {
+        variable = existingVars.find((v) => v.id === vi.id) ||
+          (await figma.variables.getVariableByIdAsync(vi.id));
+        if (!variable) throw new Error("Variable not found: " + vi.id);
+      } else {
+        variable = varByKey[collection.id + " " + vi.name] || null;
+      }
+
+      if (!variable) {
+        if (!vi.type) {
+          throw new Error('Variable "' + vi.name + '" needs `type` (COLOR|FLOAT|STRING|BOOLEAN) to be created');
+        }
+        variable = figma.variables.createVariable(vi.name, collection, vi.type);
+        result.variablesCreated++;
+        existingVars.push(variable);
+        varByKey[collection.id + " " + variable.name] = variable;
+        varByName[variable.name] = variable;
+      } else {
+        result.variablesUpdated++;
+        if (vi.name && variable.name !== vi.name) variable.name = vi.name;
+      }
+
+      if (Array.isArray(vi.scopes)) variable.scopes = vi.scopes;
+      if (typeof vi.description === "string") variable.description = vi.description;
+
+      const vbm = vi.valuesByMode || {};
+      for (const modeName in vbm) {
+        const modeId = modeIdByName[modeName];
+        if (!modeId) {
+          throw new Error('Mode "' + modeName + '" not found in "' + collection.name + '". Declare it in `modes`.');
+        }
+        const raw = vbm[modeName];
+        if (isAliasInput(raw)) {
+          pendingAliases.push({ variable, modeId, ref: raw, collectionId: collection.id });
+        } else {
+          variable.setValueForMode(modeId, coerceVariableValue(variable.resolvedType, raw));
+        }
+      }
+      varsOut.push({ id: variable.id, name: variable.name, type: variable.resolvedType });
+    }
+
+    result.collections.push({
+      id: collection.id,
+      name: collection.name,
+      modes: collection.modes.map((m) => ({ modeId: m.modeId, name: m.name })),
+      variables: varsOut,
+    });
+  }
+
+  for (const pa of pendingAliases) {
+    const refName = pa.ref.alias;
+    const refId = pa.ref.id;
+    let target = null;
+    if (refId) target = await figma.variables.getVariableByIdAsync(refId);
+    if (!target && refName) {
+      target = varByKey[pa.collectionId + " " + refName] || varByName[refName] || null;
+    }
+    if (!target) throw new Error("Alias target not found: " + (refName || refId));
+    pa.variable.setValueForMode(pa.modeId, figma.variables.createVariableAlias(target));
+  }
+
+  return result;
+}
+
+// Fills/strokes bind their *paint* color, not a plain node field, so they go through
+// setBoundVariableForPaint. Everything else uses node.setBoundVariable(field, ...).
+var BIND_PAINT_FIELDS = { fills: "fills", fill: "fills", strokes: "strokes", stroke: "strokes" };
+var BIND_FIELD_ALIASES = { gap: "itemSpacing", spacing: "itemSpacing", radius: "cornerRadius" };
+
+async function bindVariables(params) {
+  const bindings = (params && params.bindings) || [];
+  if (!Array.isArray(bindings) || bindings.length === 0) {
+    throw new Error("bind_variables requires a non-empty `bindings` array");
+  }
+
+  const results = [];
+  for (const b of bindings) {
+    try {
+      const node = await figma.getNodeByIdAsync(b.nodeId);
+      if (!node) throw new Error("Node not found: " + b.nodeId);
+
+      let variable = null;
+      if (!b.unbind) {
+        if (b.variableId) variable = await figma.variables.getVariableByIdAsync(b.variableId);
+        else if (b.variableName) {
+          const all = await figma.variables.getLocalVariablesAsync();
+          variable = all.find((v) => v.name === b.variableName) || null;
+        }
+        if (!variable) throw new Error("Variable not found: " + (b.variableId || b.variableName));
+      }
+
+      let field = String(b.field || "");
+      const paintKind = BIND_PAINT_FIELDS[field];
+      if (paintKind) {
+        const idx = b.paintIndex || 0;
+        const arr = (node[paintKind] || []).map((p) => Object.assign({}, p));
+        if (!arr[idx]) throw new Error(paintKind + "[" + idx + "] does not exist on node " + b.nodeId);
+        arr[idx] = figma.variables.setBoundVariableForPaint(arr[idx], "color", b.unbind ? null : variable);
+        node[paintKind] = arr;
+      } else {
+        field = BIND_FIELD_ALIASES[field] || field;
+        node.setBoundVariable(field, b.unbind ? null : variable);
+      }
+
+      results.push({
+        nodeId: b.nodeId,
+        field: b.field,
+        bound: !b.unbind,
+        variableId: variable ? variable.id : null,
+        variableName: variable ? variable.name : null,
+      });
+    } catch (e) {
+      results.push({ nodeId: b.nodeId, field: b.field, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  return { results, total: bindings.length, applied: results.filter((r) => !r.error).length };
 }
