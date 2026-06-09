@@ -1132,7 +1132,7 @@ server.tool(
 );
 server.tool(
   "export_node_as_image",
-  "Export one or more nodes as images from Figma. Each node may request several scales at once, so a single call can produce many files.",
+  "Export one or more nodes as images from Figma. Each node may request several scales at once, so a single call can produce many files. To actually look at how a node renders, pass inline:true with a small scale (e.g. 0.5) so the image comes back in the response and stays cheap on context.",
   {
     nodes: import_zod2.z.array(
       import_zod2.z.object({
@@ -1144,7 +1144,7 @@ server.tool(
     ).nonempty().describe("Nodes to export. Each entry exports its node at its own scale(s)."),
     format: import_zod2.z.enum(["PNG", "JPG", "SVG", "PDF"]).optional().describe("Export format shared by all nodes (default PNG)."),
     inline: import_zod2.z.boolean().optional().describe(
-      `Return the image(s) directly in the response instead of writing files, so you can see them. Only set this when you actually need to look at the pixels. Honored only for raster formats (PNG/JPG) whose encoded size is under ${INLINE_MAX_BYTES / 1024}KB \u2014 anything larger (or SVG/PDF) falls back to a file to avoid blowing up the context.`
+      `Return the image(s) directly in the response instead of writing files, so you can see them. Set this whenever you want to look at how something renders \u2014 and pair it with a small scale (e.g. 0.5) to keep it cheap. Honored only for raster formats (PNG/JPG) whose encoded size is under ${INLINE_MAX_BYTES / 1024}KB \u2014 anything larger (or SVG/PDF) falls back to a file to avoid blowing up the context.`
     ),
     outputDir: import_zod2.z.string().optional().describe(
       "Directory to write the images into (created if missing). Defaults to the OS temp dir. Files are auto-named export-<nodeId>@<scale>x.<ext>. Ignored for images returned inline."

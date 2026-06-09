@@ -816,7 +816,7 @@ server.tool(
 // Export Node as Image Tool
 server.tool(
   "export_node_as_image",
-  "Export one or more nodes as images from Figma. Each node may request several scales at once, so a single call can produce many files.",
+  "Export one or more nodes as images from Figma. Each node may request several scales at once, so a single call can produce many files. To actually look at how a node renders, pass inline:true with a small scale (e.g. 0.5) so the image comes back in the response and stays cheap on context.",
   {
     nodes: z
       .array(
@@ -840,7 +840,7 @@ server.tool(
       .boolean()
       .optional()
       .describe(
-        `Return the image(s) directly in the response instead of writing files, so you can see them. Only set this when you actually need to look at the pixels. Honored only for raster formats (PNG/JPG) whose encoded size is under ${INLINE_MAX_BYTES / 1024}KB — anything larger (or SVG/PDF) falls back to a file to avoid blowing up the context.`
+        `Return the image(s) directly in the response instead of writing files, so you can see them. Set this whenever you want to look at how something renders — and pair it with a small scale (e.g. 0.5) to keep it cheap. Honored only for raster formats (PNG/JPG) whose encoded size is under ${INLINE_MAX_BYTES / 1024}KB — anything larger (or SVG/PDF) falls back to a file to avoid blowing up the context.`
       ),
     outputDir: z
       .string()
