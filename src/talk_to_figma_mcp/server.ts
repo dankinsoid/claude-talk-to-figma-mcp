@@ -2024,7 +2024,7 @@ server.tool(
 // Combine standalone components into a variant set (COMPONENT_SET)
 server.tool(
   "combine_as_variants",
-  "Combine 2+ standalone COMPONENT nodes into a single COMPONENT_SET (variants). Figma derives variant properties from each component's name in \"Prop=Value, Prop2=Value2\" form, so pass `rename` to set those names atomically before merging (e.g. State=Default, State=Hover). All components must be on the same page.",
+  "Combine 2+ standalone COMPONENT nodes into a single COMPONENT_SET (variants). Figma derives variant properties from each component's name in \"Prop=Value, Prop2=Value2\" form, so pass `rename` to set those names atomically before merging (e.g. State=Default, State=Hover). All components must be on the same page. By default the variants are packed into a tidy grid (the raw Figma API keeps each component's original x/y, leaving gaps) — when there are exactly 2 variant props the grid is the variant matrix (prop1 down rows, prop2 across columns), otherwise a near-square wrap; pass `arrange:false` to keep the source positions, or `gap` to set the spacing (default 16).",
   {
     nodeIds: z.array(z.string()).min(2).describe("IDs of the COMPONENT nodes to combine (at least 2, same page)"),
     name: z.string().optional().describe("Name for the resulting component set"),
@@ -2033,21 +2033,24 @@ server.tool(
       .array(z.object({ nodeId: z.string(), name: z.string() }))
       .optional()
       .describe("Rename components before combining, to set variant props via \"Prop=Value\" naming"),
+    arrange: z.boolean().optional().describe("Pack variants into a grid after combining (default true). false keeps source x/y."),
+    gap: z.number().min(0).optional().describe("Spacing between variants when arranging (px, default 16)."),
   },
-  async ({ nodeIds, name, parentId, rename }: any) => {
+  async ({ nodeIds, name, parentId, rename, arrange, gap }: any) => {
     try {
-      const result: any = await sendCommandToFigma("combine_as_variants", { nodeIds, name, parentId, rename });
+      const result: any = await sendCommandToFigma("combine_as_variants", { nodeIds, name, parentId, rename, arrange, gap });
       const props = result.variantProperties
         ? Object.entries(result.variantProperties)
             .map(([k, v]: any) => `${k}: [${(v?.values || []).join(", ")}]`)
             .join("; ")
         : "none";
       const warn = result.variantWarning ? `\n⚠️ ${result.variantWarning}` : "";
+      const grid = result.arranged ? ", packed into a grid" : "";
       return {
         content: [
           {
             type: "text",
-            text: `Created component set "${result.name}" (ID: ${result.id}) with ${result.childCount} variants. Properties: ${props}${warn}`,
+            text: `Created component set "${result.name}" (ID: ${result.id}) with ${result.childCount} variants${grid}. Properties: ${props}${warn}`,
           },
         ],
       };

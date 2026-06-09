@@ -3663,8 +3663,88 @@ async function setSelections(params) {
 // Figma derives variant properties from each component's name in
 // "Prop=Value, Prop2=Value2" form, so callers usually pass `rename` to set
 // those names atomically before the merge.
+// Parse a component name ("State=Hover, Size=Large") into a {prop: value} map.
+function parseVariantName(name) {
+  const out = {};
+  for (const part of String(name).split(",")) {
+    const i = part.indexOf("=");
+    if (i > 0) out[part.slice(0, i).trim()] = part.slice(i + 1).trim();
+  }
+  return out;
+}
+
+// When the set has exactly 2 variant props, place each child on the matrix
+// (rows = first prop's values, cols = second's) so the grid reads like the
+// variant table. Returns null to fall back to a wrap grid: names aren't valid
+// Prop=Value pairs, there aren't exactly 2 props, or a child misses the matrix.
+function variantMatrixLayout(set, kids) {
+  let props;
+  try {
+    props = set.variantGroupProperties;
+  } catch (e) {
+    return null;
+  }
+  if (!props) return null;
+  const keys = Object.keys(props);
+  if (keys.length !== 2) return null;
+  const rowVals = (props[keys[0]] && props[keys[0]].values) || [];
+  const colVals = (props[keys[1]] && props[keys[1]].values) || [];
+  const out = [];
+  for (const k of kids) {
+    const m = parseVariantName(k.name);
+    const r = rowVals.indexOf(m[keys[0]]);
+    const c = colVals.indexOf(m[keys[1]]);
+    if (r < 0 || c < 0) return null;
+    out.push({ node: k, row: r, col: c });
+  }
+  return out;
+}
+
+// figma.combineAsVariants keeps each component's original x/y, so a set built
+// from scattered components has gaps (mirroring the API, not the Figma UI which
+// auto-packs). Re-lay the children into a tidy grid and shrink the set to fit.
+// Cell = the largest child footprint, so differently-sized variants still align.
+function packVariantGrid(set, opts) {
+  opts = opts || {};
+  const padding = typeof opts.padding === "number" ? opts.padding : 16;
+  const gap = typeof opts.gap === "number" ? opts.gap : 16;
+  const kids = set.children.slice();
+  if (kids.length < 1) return;
+
+  let cellW = 0;
+  let cellH = 0;
+  for (const k of kids) {
+    if (k.width > cellW) cellW = k.width;
+    if (k.height > cellH) cellH = k.height;
+  }
+
+  let layout = variantMatrixLayout(set, kids);
+  if (!layout) {
+    const cols = Math.ceil(Math.sqrt(kids.length));
+    layout = kids.map((k, i) => ({ node: k, row: Math.floor(i / cols), col: i % cols }));
+  }
+
+  let maxRow = 0;
+  let maxCol = 0;
+  for (const it of layout) {
+    if (it.row > maxRow) maxRow = it.row;
+    if (it.col > maxCol) maxCol = it.col;
+  }
+
+  for (const it of layout) {
+    it.node.x = padding + it.col * (cellW + gap);
+    it.node.y = padding + it.row * (cellH + gap);
+  }
+
+  // Resize before clearing absolute children would overflow — set spans the full
+  // grid plus padding on every side.
+  const w = padding * 2 + (maxCol + 1) * cellW + maxCol * gap;
+  const h = padding * 2 + (maxRow + 1) * cellH + maxRow * gap;
+  if ("resize" in set) set.resize(w, h);
+}
+
 async function combineAsVariants(params) {
-  const { nodeIds, name, parentId, rename } = params || {};
+  const { nodeIds, name, parentId, rename, arrange, gap } = params || {};
   if (!Array.isArray(nodeIds) || nodeIds.length < 2) {
     throw new Error("combine_as_variants requires `nodeIds` with at least 2 component ids");
   }
@@ -3707,6 +3787,19 @@ async function combineAsVariants(params) {
   const set = figma.combineAsVariants(nodes, parent);
   if (typeof name === "string" && name) set.name = name;
 
+  // Pack the children into a grid (default on) — combineAsVariants leaves them
+  // at their scattered source coords otherwise. Never fail the combine over a
+  // layout hiccup; the set already exists.
+  let arranged = false;
+  if (arrange !== false) {
+    try {
+      packVariantGrid(set, { gap });
+      arranged = true;
+    } catch (e) {
+      console.error("packVariantGrid failed:", e);
+    }
+  }
+
   // variantGroupProperties throws when names aren't valid Prop=Value pairs;
   // surface the warning rather than failing the whole op.
   let variantProperties = null;
@@ -3723,6 +3816,7 @@ async function combineAsVariants(params) {
     name: set.name,
     type: set.type,
     childCount: set.children.length,
+    arranged,
     variantProperties,
     variantWarning,
   };
