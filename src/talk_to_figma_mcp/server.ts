@@ -127,13 +127,30 @@ async function writeOutputFile(
   return { path: target, bytes };
 }
 
+// Above this inline-return size, a result is spilled to a temp file by default
+// so a huge payload never floods the model context. ~25k tokens of JSON.
+const AUTO_SAVE_BYTES = 100_000;
+
 // Render a JSON payload either inline or, when save is requested, to a file —
-// returning a single content block (the path pointer when saved).
+// returning a single content block (the path pointer when saved). Oversized
+// payloads auto-spill to a temp file even without an explicit save request;
+// if that write fails, they fall back to inline so the call still returns data.
 async function jsonContent(payload: any, save: SaveArgs, baseName: string) {
   const text = JSON.stringify(payload);
   if (save?.saveToFile || save?.outputPath) {
     const { path, bytes } = await writeOutputFile(baseName, "json", text, save.outputPath);
     return { type: "text" as const, text: `Saved ${bytes} bytes of JSON to ${path}` };
+  }
+  if (Buffer.byteLength(text) > AUTO_SAVE_BYTES) {
+    try {
+      const { path, bytes } = await writeOutputFile(baseName, "json", text);
+      return {
+        type: "text" as const,
+        text: `Output too large to return inline (${bytes} bytes); saved to ${path}. Read it from there, or re-request with a lower depth to shrink the result.`,
+      };
+    } catch {
+      // Write failed — return inline rather than nothing.
+    }
   }
   return { type: "text" as const, text };
 }
