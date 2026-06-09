@@ -1,0 +1,107 @@
+<svg width="1920" height="1080" viewBox="0 0 1920 1080" xmlns="http://www.w3.org/2000/svg" font-family="'Inter','Helvetica Neue',Arial,sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0e0f13"/>
+      <stop offset="1" stop-color="#16181f"/>
+    </linearGradient>
+    <linearGradient id="wire" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#d97757"/>
+      <stop offset="1" stop-color="#a259ff"/>
+    </linearGradient>
+    <linearGradient id="claudeg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d97757"/>
+      <stop offset="1" stop-color="#c2603f"/>
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#a259ff" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#a259ff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+  <ellipse cx="960" cy="540" rx="620" ry="360" fill="url(#glow)"/>
+
+  <!-- dotted grid -->
+  <g fill="#ffffff" opacity="0.04">
+    <!-- generated dots -->
+  </g>
+
+  <!-- ============ LEFT: Figma file (compact layer tree) ============ -->
+  <g transform="translate(150,250)">
+    <rect width="560" height="580" rx="28" fill="#1c1f27" stroke="#2c303b" stroke-width="2"/>
+    <!-- window bar -->
+    <circle cx="40" cy="44" r="9" fill="#ff5f57"/>
+    <circle cx="72" cy="44" r="9" fill="#febc2e"/>
+    <circle cx="104" cy="44" r="9" fill="#28c840"/>
+    <text x="280" y="50" fill="#6b7280" font-size="22" text-anchor="middle">Figma · canvas</text>
+    <line x1="0" y1="80" x2="560" y2="80" stroke="#2c303b" stroke-width="2"/>
+
+    <!-- layer rows -->
+    <g font-size="24" fill="#c7ccd6">
+      <g transform="translate(44,128)"><rect x="-12" y="-26" width="492" height="44" rx="8" fill="#a259ff" opacity="0.14"/><text fill="#a259ff">▸ Frame "Home"</text></g>
+      <text x="84"  y="180">▸ Group "Header"</text>
+      <text x="124" y="232" fill="#9aa1ad">T  "Welcome back"</text>
+      <text x="124" y="284" fill="#9aa1ad">◳  Avatar</text>
+      <text x="84"  y="336">▸ Auto-layout "List"</text>
+      <text x="124" y="388" fill="#9aa1ad">▭  Card · n0</text>
+      <text x="124" y="440" fill="#9aa1ad">▭  Card · n1</text>
+      <text x="124" y="492" fill="#9aa1ad">◇  Icon · n2</text>
+    </g>
+  </g>
+
+  <!-- ============ connection wire ============ -->
+  <g>
+    <path d="M 710 540 C 860 540, 1060 540, 1210 540" fill="none" stroke="url(#wire)" stroke-width="6" stroke-linecap="round"/>
+    <circle cx="710" cy="540" r="14" fill="#a259ff"/>
+    <circle cx="1210" cy="540" r="14" fill="#d97757"/>
+    <g fill="#ffffff" opacity="0.9">
+      <circle cx="900" cy="540" r="7"/>
+      <circle cx="1020" cy="540" r="7"/>
+    </g>
+    <rect x="855" y="486" width="210" height="44" rx="22" fill="#21242d" stroke="#363b47" stroke-width="2"/>
+    <text x="960" y="515" fill="#9aa1ad" font-size="22" text-anchor="middle" font-family="'SF Mono',Menlo,monospace">MCP · channel</text>
+  </g>
+
+  <!-- ============ RIGHT: Claude agent ============ -->
+  <g transform="translate(1210,250)">
+    <rect width="560" height="580" rx="28" fill="#1c1f27" stroke="#2c303b" stroke-width="2"/>
+    <circle cx="40" cy="44" r="9" fill="#ff5f57"/>
+    <circle cx="72" cy="44" r="9" fill="#febc2e"/>
+    <circle cx="104" cy="44" r="9" fill="#28c840"/>
+    <text x="280" y="50" fill="#6b7280" font-size="22" text-anchor="middle">AI agent · Claude</text>
+    <line x1="0" y1="80" x2="560" y2="80" stroke="#2c303b" stroke-width="2"/>
+
+    <!-- user msg -->
+    <g transform="translate(40,120)">
+      <rect width="480" height="84" rx="16" fill="#23262f"/>
+      <text x="28" y="38" fill="#c7ccd6" font-size="23">Make the cards rounder and</text>
+      <text x="28" y="66" fill="#c7ccd6" font-size="23">recolor the header to brand.</text>
+    </g>
+
+    <!-- claude logo -->
+    <g transform="translate(40,232)">
+      <circle cx="26" cy="26" r="26" fill="url(#claudeg)"/>
+      <text x="26" y="35" fill="#1c1f27" font-size="30" font-weight="700" text-anchor="middle">✳</text>
+    </g>
+
+    <!-- tool calls -->
+    <g font-family="'SF Mono',Menlo,monospace" font-size="21">
+      <g transform="translate(110,236)"><rect width="410" height="46" rx="10" fill="#15171d" stroke="#2c303b"/><text x="18" y="30" fill="#a259ff">query_nodes</text><text x="180" y="30" fill="#5d6470">type=Card</text></g>
+      <g transform="translate(110,296)"><rect width="410" height="46" rx="10" fill="#15171d" stroke="#2c303b"/><text x="18" y="30" fill="#7ec699">edit_nodes</text><text x="170" y="30" fill="#5d6470">cornerRadius=24</text></g>
+      <g transform="translate(110,356)"><rect width="410" height="46" rx="10" fill="#15171d" stroke="#2c303b"/><text x="18" y="30" fill="#7ec699">edit_nodes</text><text x="170" y="30" fill="#5d6470">fills=#D97757</text></g>
+    </g>
+
+    <g transform="translate(40,430)">
+      <rect width="480" height="100" rx="16" fill="#23262f"/>
+      <text x="28" y="40" fill="#9aa1ad" font-size="22">Done — updated 4 cards and the</text>
+      <text x="28" y="72" fill="#9aa1ad" font-size="22">header fill. ✓</text>
+    </g>
+  </g>
+
+  <!-- ============ title block ============ -->
+  <text x="960" y="120" fill="#ffffff" font-size="64" font-weight="800" text-anchor="middle" letter-spacing="-1">Talk to Figma</text>
+  <text x="960" y="965" fill="#9aa1ad" font-size="32" text-anchor="middle">Let Claude and other AI agents read and edit your designs — over MCP</text>
+</svg>
