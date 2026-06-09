@@ -9,15 +9,15 @@ https://github.com/user-attachments/assets/129a14d2-ed73-470f-9a4c-2240b2a4885c
 This is a fork of [sonnylazuardi/cursor-talk-to-figma-mcp](https://github.com/sonnylazuardi/cursor-talk-to-figma-mcp). It has diverged substantially. The original worked, but in practice it was slow, expensive, and limited:
 
 - it fed the model **near-complete node JSON** for every read — thousands of tokens per node, with full geometry, paints and styles the agent rarely needed;
-- there was **no way to search** — to find anything you dumped a whole subtree and scanned it by eye;
+- **search was rigid** — a couple of fixed scans (by type, by text node) that returned heavy results; anything beyond them meant dumping a whole subtree and scanning it by eye;
 - **editing was limited** to a handful of single-purpose setters.
 
 This fork reworks the agent's interface around how an AI agent already works with a **codebase** — locate cheaply, read narrowly, edit surgically.
 
 **What's different:**
 
-- **Compact, zoomable hierarchy.** Reads return a minimal field set per node (id, name, type, color, box/auto-layout, text) instead of raw JSON, with a depth cap, drill-in stubs, and collapsing of icons and repeated component instances. A screen that was tens of thousands of tokens is now ~2–3k.
-- **Search tools, code-agent style.** `glob_nodes` (the `ls -R`/glob), `grep_nodes` (regex over text content, the `grep`), and `query_nodes` (predicates over node fields). They return flat, line-oriented `id:"name".TYPE` hits — addresses you feed straight into read/edit, without ever dumping the tree.
+- **Compact, zoomable hierarchy.** Reads return a minimal field set per node (id, name, type, color, box/auto-layout, text) instead of raw JSON, with a depth cap, drill-in stubs, and collapsing of icons and repeated component instances. A screen that was tens of thousands of tokens is now around ~5k.
+- **Powerful, flexible search, code-agent style.** In place of the old fixed scans, three composable tools: `glob_nodes` (the `ls -R`/glob, filter by type and name pattern), `grep_nodes` (regex over text content, the `grep`), and `query_nodes` (arbitrary predicates over node fields — fontSize, fills color, bound variables, key presence). They return flat, line-oriented `id:"name".TYPE` hits — addresses you feed straight into read/edit, without ever dumping the tree.
 - **A `Read` → `Edit` → `Write` model.** `read_node`, `edit_nodes` (one path-addressed property writer that replaced ~10 single-purpose setters), and `write_nodes` (create whole subtrees from JSON) mirror the file tools the agent is already trained on.
 - **Short node ids.** Long nested instance paths (`I8782:344721;3063:34762;…`) are replaced with short counters (`n0`, `n1`, …) in all compact output, resolved back server-side. Cuts tokens and keeps the tree readable; every tool accepts short or canonical ids.
 - **Bug fixes.** Notably, the original could corrupt text colors: the reaction-highlight animation didn't always restore the original fill. Fixed.
