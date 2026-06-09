@@ -2433,6 +2433,101 @@ server.tool(
     }
   }
 );
+var transitionSchema = import_zod4.z.object({
+  type: import_zod4.z.enum([
+    "DISSOLVE",
+    "SMART_ANIMATE",
+    "SCROLL_ANIMATE",
+    "MOVE_IN",
+    "MOVE_OUT",
+    "PUSH",
+    "SLIDE_IN",
+    "SLIDE_OUT"
+  ]).describe("Animation style for the navigation"),
+  easing: import_zod4.z.object({ type: import_zod4.z.string() }).passthrough().optional(),
+  duration: import_zod4.z.number().optional().describe("Duration in seconds"),
+  direction: import_zod4.z.enum(["LEFT", "RIGHT", "TOP", "BOTTOM"]).optional(),
+  matchLayers: import_zod4.z.boolean().optional().describe("SMART_ANIMATE: match layers by name")
+}).passthrough();
+var reactionActionSchema = import_zod4.z.object({
+  type: import_zod4.z.enum([
+    "BACK",
+    "CLOSE",
+    "URL",
+    "NODE",
+    "SET_VARIABLE",
+    "SET_VARIABLE_MODE",
+    "CONDITIONAL",
+    "UPDATE_MEDIA_RUNTIME"
+  ]).describe("Action kind. NODE = navigate/overlay/swap to another frame."),
+  url: import_zod4.z.string().optional().describe("URL action: link to open"),
+  destinationId: import_zod4.z.string().nullable().optional().describe("NODE action: target node id (the frame to navigate/swap/overlay to)"),
+  navigation: import_zod4.z.enum(["NAVIGATE", "SWAP", "OVERLAY", "SCROLL_TO", "CHANGE_TO"]).optional().describe("NODE action: how the destination is presented"),
+  transition: transitionSchema.nullable().optional(),
+  preserveScrollPosition: import_zod4.z.boolean().optional(),
+  overlayRelativePosition: import_zod4.z.object({ x: import_zod4.z.number(), y: import_zod4.z.number() }).optional(),
+  resetVideoPosition: import_zod4.z.boolean().optional(),
+  resetScrollPosition: import_zod4.z.boolean().optional(),
+  resetInteractionState: import_zod4.z.boolean().optional()
+}).passthrough();
+var reactionTriggerSchema = import_zod4.z.object({
+  type: import_zod4.z.enum([
+    "ON_CLICK",
+    "ON_HOVER",
+    "ON_PRESS",
+    "ON_DRAG",
+    "AFTER_TIMEOUT",
+    "MOUSE_ENTER",
+    "MOUSE_LEAVE",
+    "MOUSE_UP",
+    "MOUSE_DOWN",
+    "ON_KEY_DOWN",
+    "ON_MEDIA_HIT",
+    "ON_MEDIA_END"
+  ]).describe("What initiates the reaction"),
+  timeout: import_zod4.z.number().optional().describe("AFTER_TIMEOUT: delay in seconds"),
+  delay: import_zod4.z.number().optional().describe("MOUSE_* triggers: delay in seconds"),
+  device: import_zod4.z.string().optional().describe("ON_KEY_DOWN: input device (e.g. KEYBOARD)"),
+  keyCodes: import_zod4.z.array(import_zod4.z.number()).optional().describe("ON_KEY_DOWN: key codes"),
+  mediaHitTime: import_zod4.z.number().optional().describe("ON_MEDIA_HIT: time in seconds")
+}).passthrough();
+var reactionSchema = import_zod4.z.object({
+  trigger: reactionTriggerSchema.nullable().describe("The interaction that fires the actions"),
+  actions: import_zod4.z.array(reactionActionSchema).optional().describe("Actions to run when triggered"),
+  action: reactionActionSchema.optional().describe("Deprecated single-action form; prefer `actions`")
+}).passthrough();
+server.tool(
+  "set_reactions",
+  "Install prototyping reactions (interactions/transitions) onto Figma nodes via setReactionsAsync \u2014 the write-side twin of get_reactions. Use this to create prototype flows: e.g. an ON_CLICK trigger with a NODE action navigating to another frame with a SMART_ANIMATE transition. NOTE: this REPLACES the full reaction list on each node, so pass the complete desired set (use get_reactions first to preserve existing ones). Most scene nodes support reactions; pages/documents do not.",
+  {
+    reactions: import_zod4.z.array(
+      import_zod4.z.object({
+        nodeId: import_zod4.z.string().describe("ID of the node to attach reactions to"),
+        reactions: import_zod4.z.array(reactionSchema).describe("Complete list of reactions to set on this node (replaces existing)")
+      })
+    ).describe("Per-node reaction sets to install")
+  },
+  async ({ reactions }) => {
+    try {
+      const result = await sendCommandToFigma("set_reactions", { reactions });
+      const typed = result;
+      const failures = typed.results.filter((r) => !r.success);
+      const summary = `Set reactions on ${typed.succeeded}/${typed.total} nodes${typed.failed ? `, ${typed.failed} failed` : ""}.${failures.length ? ` Failures: ${failures.map((f) => `${f.nodeId ?? "?"}: ${f.error}`).join("; ")}` : ""}`;
+      return {
+        content: [{ type: "text", text: summary }]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error setting reactions: ${error instanceof Error ? error.message : String(error)}`
+          }
+        ]
+      };
+    }
+  }
+);
 server.tool(
   "set_default_connector",
   "Set a copied connector node as the default connector",

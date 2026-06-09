@@ -255,7 +255,9 @@ async function handleCommand(command, params) {
       if (!params || !params.nodeIds || !Array.isArray(params.nodeIds)) {
         throw new Error("Missing or invalid nodeIds parameter");
       }
-      return await getReactions(params.nodeIds);  
+      return await getReactions(params.nodeIds);
+    case "set_reactions":
+      return await setReactions(params);
     case "set_default_connector":
       return await setDefaultConnector(params);
     case "create_connections":
@@ -631,6 +633,47 @@ async function getReactions(nodeIds) {
   } catch (error) {
     throw new Error(`Failed to get reactions: ${error.message}`);
   }
+}
+
+// @ai-generated(solo)
+// Write-side twin of getReactions: install prototyping reactions onto nodes.
+// Each entry is { nodeId, reactions } where `reactions` is a raw Figma Reaction[]
+// (trigger + actions). setReactionsAsync REPLACES the node's full reaction list,
+// so callers must pass the complete desired set, not a delta. Entries are
+// independent — one failure records its error without aborting the rest.
+async function setReactions(params) {
+  const entries = params && params.reactions;
+  if (!Array.isArray(entries)) {
+    throw new Error("Missing or invalid 'reactions' parameter; expected an array of { nodeId, reactions }");
+  }
+
+  const results = [];
+  for (const entry of entries) {
+    if (!entry || !entry.nodeId) {
+      results.push({ success: false, error: "Missing nodeId in entry" });
+      continue;
+    }
+    try {
+      const node = await figma.getNodeByIdAsync(entry.nodeId);
+      if (!node) {
+        results.push({ nodeId: entry.nodeId, success: false, error: "Node not found" });
+        continue;
+      }
+      // setReactionsAsync lives on most scene nodes but not on the page/document.
+      if (typeof node.setReactionsAsync !== "function") {
+        results.push({ nodeId: entry.nodeId, success: false, error: `Node type ${node.type} does not support reactions` });
+        continue;
+      }
+      const reactions = Array.isArray(entry.reactions) ? entry.reactions : [];
+      await node.setReactionsAsync(reactions);
+      results.push({ nodeId: entry.nodeId, name: node.name, success: true, reactionsCount: reactions.length });
+    } catch (error) {
+      results.push({ nodeId: entry.nodeId, success: false, error: error.message });
+    }
+  }
+
+  const succeeded = results.filter((r) => r.success).length;
+  return { total: entries.length, succeeded, failed: entries.length - succeeded, results };
 }
 
 // @ai-generated(solo)

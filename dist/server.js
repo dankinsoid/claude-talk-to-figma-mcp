@@ -2411,6 +2411,101 @@ server.tool(
     }
   }
 );
+var transitionSchema = z4.object({
+  type: z4.enum([
+    "DISSOLVE",
+    "SMART_ANIMATE",
+    "SCROLL_ANIMATE",
+    "MOVE_IN",
+    "MOVE_OUT",
+    "PUSH",
+    "SLIDE_IN",
+    "SLIDE_OUT"
+  ]).describe("Animation style for the navigation"),
+  easing: z4.object({ type: z4.string() }).passthrough().optional(),
+  duration: z4.number().optional().describe("Duration in seconds"),
+  direction: z4.enum(["LEFT", "RIGHT", "TOP", "BOTTOM"]).optional(),
+  matchLayers: z4.boolean().optional().describe("SMART_ANIMATE: match layers by name")
+}).passthrough();
+var reactionActionSchema = z4.object({
+  type: z4.enum([
+    "BACK",
+    "CLOSE",
+    "URL",
+    "NODE",
+    "SET_VARIABLE",
+    "SET_VARIABLE_MODE",
+    "CONDITIONAL",
+    "UPDATE_MEDIA_RUNTIME"
+  ]).describe("Action kind. NODE = navigate/overlay/swap to another frame."),
+  url: z4.string().optional().describe("URL action: link to open"),
+  destinationId: z4.string().nullable().optional().describe("NODE action: target node id (the frame to navigate/swap/overlay to)"),
+  navigation: z4.enum(["NAVIGATE", "SWAP", "OVERLAY", "SCROLL_TO", "CHANGE_TO"]).optional().describe("NODE action: how the destination is presented"),
+  transition: transitionSchema.nullable().optional(),
+  preserveScrollPosition: z4.boolean().optional(),
+  overlayRelativePosition: z4.object({ x: z4.number(), y: z4.number() }).optional(),
+  resetVideoPosition: z4.boolean().optional(),
+  resetScrollPosition: z4.boolean().optional(),
+  resetInteractionState: z4.boolean().optional()
+}).passthrough();
+var reactionTriggerSchema = z4.object({
+  type: z4.enum([
+    "ON_CLICK",
+    "ON_HOVER",
+    "ON_PRESS",
+    "ON_DRAG",
+    "AFTER_TIMEOUT",
+    "MOUSE_ENTER",
+    "MOUSE_LEAVE",
+    "MOUSE_UP",
+    "MOUSE_DOWN",
+    "ON_KEY_DOWN",
+    "ON_MEDIA_HIT",
+    "ON_MEDIA_END"
+  ]).describe("What initiates the reaction"),
+  timeout: z4.number().optional().describe("AFTER_TIMEOUT: delay in seconds"),
+  delay: z4.number().optional().describe("MOUSE_* triggers: delay in seconds"),
+  device: z4.string().optional().describe("ON_KEY_DOWN: input device (e.g. KEYBOARD)"),
+  keyCodes: z4.array(z4.number()).optional().describe("ON_KEY_DOWN: key codes"),
+  mediaHitTime: z4.number().optional().describe("ON_MEDIA_HIT: time in seconds")
+}).passthrough();
+var reactionSchema = z4.object({
+  trigger: reactionTriggerSchema.nullable().describe("The interaction that fires the actions"),
+  actions: z4.array(reactionActionSchema).optional().describe("Actions to run when triggered"),
+  action: reactionActionSchema.optional().describe("Deprecated single-action form; prefer `actions`")
+}).passthrough();
+server.tool(
+  "set_reactions",
+  "Install prototyping reactions (interactions/transitions) onto Figma nodes via setReactionsAsync \u2014 the write-side twin of get_reactions. Use this to create prototype flows: e.g. an ON_CLICK trigger with a NODE action navigating to another frame with a SMART_ANIMATE transition. NOTE: this REPLACES the full reaction list on each node, so pass the complete desired set (use get_reactions first to preserve existing ones). Most scene nodes support reactions; pages/documents do not.",
+  {
+    reactions: z4.array(
+      z4.object({
+        nodeId: z4.string().describe("ID of the node to attach reactions to"),
+        reactions: z4.array(reactionSchema).describe("Complete list of reactions to set on this node (replaces existing)")
+      })
+    ).describe("Per-node reaction sets to install")
+  },
+  async ({ reactions }) => {
+    try {
+      const result = await sendCommandToFigma("set_reactions", { reactions });
+      const typed = result;
+      const failures = typed.results.filter((r) => !r.success);
+      const summary = `Set reactions on ${typed.succeeded}/${typed.total} nodes${typed.failed ? `, ${typed.failed} failed` : ""}.${failures.length ? ` Failures: ${failures.map((f) => `${f.nodeId ?? "?"}: ${f.error}`).join("; ")}` : ""}`;
+      return {
+        content: [{ type: "text", text: summary }]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error setting reactions: ${error instanceof Error ? error.message : String(error)}`
+          }
+        ]
+      };
+    }
+  }
+);
 server.tool(
   "set_default_connector",
   "Set a copied connector node as the default connector",

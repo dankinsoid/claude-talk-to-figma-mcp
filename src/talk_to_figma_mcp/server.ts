@@ -1598,6 +1598,143 @@ server.tool(
   }
 );
 
+// Schemas for set_reactions: a Figma Reaction is `{ trigger, actions }`. We keep
+// these permissive (.passthrough()) so newer Figma fields pass through unblocked.
+const transitionSchema = z
+  .object({
+    type: z
+      .enum([
+        "DISSOLVE",
+        "SMART_ANIMATE",
+        "SCROLL_ANIMATE",
+        "MOVE_IN",
+        "MOVE_OUT",
+        "PUSH",
+        "SLIDE_IN",
+        "SLIDE_OUT",
+      ])
+      .describe("Animation style for the navigation"),
+    easing: z.object({ type: z.string() }).passthrough().optional(),
+    duration: z.number().optional().describe("Duration in seconds"),
+    direction: z.enum(["LEFT", "RIGHT", "TOP", "BOTTOM"]).optional(),
+    matchLayers: z.boolean().optional().describe("SMART_ANIMATE: match layers by name"),
+  })
+  .passthrough();
+
+const reactionActionSchema = z
+  .object({
+    type: z
+      .enum([
+        "BACK",
+        "CLOSE",
+        "URL",
+        "NODE",
+        "SET_VARIABLE",
+        "SET_VARIABLE_MODE",
+        "CONDITIONAL",
+        "UPDATE_MEDIA_RUNTIME",
+      ])
+      .describe("Action kind. NODE = navigate/overlay/swap to another frame."),
+    url: z.string().optional().describe("URL action: link to open"),
+    destinationId: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("NODE action: target node id (the frame to navigate/swap/overlay to)"),
+    navigation: z
+      .enum(["NAVIGATE", "SWAP", "OVERLAY", "SCROLL_TO", "CHANGE_TO"])
+      .optional()
+      .describe("NODE action: how the destination is presented"),
+    transition: transitionSchema.nullable().optional(),
+    preserveScrollPosition: z.boolean().optional(),
+    overlayRelativePosition: z.object({ x: z.number(), y: z.number() }).optional(),
+    resetVideoPosition: z.boolean().optional(),
+    resetScrollPosition: z.boolean().optional(),
+    resetInteractionState: z.boolean().optional(),
+  })
+  .passthrough();
+
+const reactionTriggerSchema = z
+  .object({
+    type: z
+      .enum([
+        "ON_CLICK",
+        "ON_HOVER",
+        "ON_PRESS",
+        "ON_DRAG",
+        "AFTER_TIMEOUT",
+        "MOUSE_ENTER",
+        "MOUSE_LEAVE",
+        "MOUSE_UP",
+        "MOUSE_DOWN",
+        "ON_KEY_DOWN",
+        "ON_MEDIA_HIT",
+        "ON_MEDIA_END",
+      ])
+      .describe("What initiates the reaction"),
+    timeout: z.number().optional().describe("AFTER_TIMEOUT: delay in seconds"),
+    delay: z.number().optional().describe("MOUSE_* triggers: delay in seconds"),
+    device: z.string().optional().describe("ON_KEY_DOWN: input device (e.g. KEYBOARD)"),
+    keyCodes: z.array(z.number()).optional().describe("ON_KEY_DOWN: key codes"),
+    mediaHitTime: z.number().optional().describe("ON_MEDIA_HIT: time in seconds"),
+  })
+  .passthrough();
+
+const reactionSchema = z
+  .object({
+    trigger: reactionTriggerSchema.nullable().describe("The interaction that fires the actions"),
+    actions: z.array(reactionActionSchema).optional().describe("Actions to run when triggered"),
+    action: reactionActionSchema
+      .optional()
+      .describe("Deprecated single-action form; prefer `actions`"),
+  })
+  .passthrough();
+
+// A tool to write Figma Prototyping Reactions onto nodes (create prototype flows/transitions)
+server.tool(
+  "set_reactions",
+  "Install prototyping reactions (interactions/transitions) onto Figma nodes via setReactionsAsync — the write-side twin of get_reactions. Use this to create prototype flows: e.g. an ON_CLICK trigger with a NODE action navigating to another frame with a SMART_ANIMATE transition. NOTE: this REPLACES the full reaction list on each node, so pass the complete desired set (use get_reactions first to preserve existing ones). Most scene nodes support reactions; pages/documents do not.",
+  {
+    reactions: z
+      .array(
+        z.object({
+          nodeId: z.string().describe("ID of the node to attach reactions to"),
+          reactions: z
+            .array(reactionSchema)
+            .describe("Complete list of reactions to set on this node (replaces existing)"),
+        })
+      )
+      .describe("Per-node reaction sets to install"),
+  },
+  async ({ reactions }: any) => {
+    try {
+      const result = await sendCommandToFigma("set_reactions", { reactions });
+      const typed = result as {
+        total: number;
+        succeeded: number;
+        failed: number;
+        results: Array<{ nodeId?: string; success: boolean; error?: string; reactionsCount?: number }>;
+      };
+      const failures = typed.results.filter((r) => !r.success);
+      const summary = `Set reactions on ${typed.succeeded}/${typed.total} nodes${
+        typed.failed ? `, ${typed.failed} failed` : ""
+      }.${failures.length ? ` Failures: ${failures.map((f) => `${f.nodeId ?? "?"}: ${f.error}`).join("; ")}` : ""}`;
+      return {
+        content: [{ type: "text", text: summary }],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error setting reactions: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
 // Create Connectors Tool
 server.tool(
   "set_default_connector",
@@ -2102,6 +2239,7 @@ type FigmaCommand =
   | "query_nodes"
   | "edit_nodes"
   | "get_reactions"
+  | "set_reactions"
   | "set_default_connector"
   | "create_connections"
   | "set_focus"
@@ -2194,6 +2332,9 @@ type CommandParams = {
     maxMatches?: number;
   };
   get_reactions: { nodeIds: string[] };
+  set_reactions: {
+    reactions: Array<{ nodeId: string; reactions: Array<Record<string, any>> }>;
+  };
   set_default_connector: {
     connectorId?: string | undefined;
   };
