@@ -16,6 +16,7 @@ AI agent ←(stdio)→ MCP Server ←(WebSocket)→ WebSocket Relay ←(WebSocke
 bun install              # Install dependencies
 bun run build            # Build MCP server (tsup → dist/)
 bun run dev              # Build in watch mode
+bun gen:schema           # Regenerate write_schema.generated.ts from @figma/plugin-typings
 bun socket               # Start WebSocket relay server (port 3055)
 bun run start            # Run built MCP server
 bun setup                # Full setup (install + write .cursor/mcp.json + .mcp.json)

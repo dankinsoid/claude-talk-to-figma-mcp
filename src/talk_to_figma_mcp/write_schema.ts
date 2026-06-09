@@ -1,25 +1,29 @@
 // @ai-generated(guided)
 // Single source of truth for the write_nodes contract.
 //
-// The same per-type Zod schemas serve two jobs that must never drift apart:
-//   1. Validation gate — write_nodes parses its input against these, so a
-//      malformed spec fails fast at the MCP boundary with a precise field path
-//      instead of silently no-opping inside the Figma plugin.
-//   2. Lazy, on-demand docs — describeNodeSchema() renders one type's schema as
-//      a compact field list, so the agent can ask "what does a TEXT spec take?"
+// The per-type Zod schemas serve two jobs that must never drift apart:
+//   1. Validation gate — write_nodes parses input against these, so a malformed
+//      spec fails fast at the MCP boundary with a precise field path instead of
+//      silently no-opping inside the Figma plugin.
+//   2. Lazy, on-demand docs — describeNodeSchema() renders one type's schema as a
+//      compact field list, so the agent can ask "what does a TEXT spec take?"
 //      right before creating one and build to the answer.
 //
-// Because docs are derived from the validator, the doc can't describe a field
-// the gate rejects, or omit one it accepts.
+// The field SET and TYPES are generated from @figma/plugin-typings
+// (write_schema.generated.ts, via `bun gen:schema`) so they can't silently drift
+// from Figma's real runtime types — the letterSpacing-was-a-number class of bug.
+// This hand layer adds what the types can't express: human .describe() NOTES (the
+// non-obvious "why"), synthetic spec-only fields (parentId/index/children/...),
+// and coercion-driven overrides (letterSpacing accepts a bare number).
 //
-// Schemas are intentionally `.passthrough()`: write_nodes is permissive by
-// design — every extra key is written straight onto the node and Figma rejects
-// bad ones per-property. The curated fields below are the high-value, commonly
-// wrong ones (typed, range-checked, enum-constrained); anything else still
-// passes through untouched. So this is a guardrail on the common case, not a
-// whitelist that would regress arbitrary-property support.
+// Schemas are `.passthrough()`: write_nodes is permissive — every extra key is
+// written straight onto the node and Figma rejects bad ones per-property. The
+// generated fields are the high-value, type-checked common set; anything else
+// still passes through untouched.
 
 import { z } from "zod";
+import { GENERATED_FIELDS } from "./write_schema.generated.js";
+import { Color, Paint } from "./shared-schemas.js";
 
 /** Node types write_nodes can create — mirrors NODE_FACTORIES + INSTANCE in code.js. */
 export const NODE_TYPES = [
@@ -28,108 +32,43 @@ export const NODE_TYPES = [
 ] as const;
 export type NodeType = (typeof NODE_TYPES)[number];
 
-// ── shared value schemas ──────────────────────────────────────────────────
-
-/** A color as `#RRGGBB`/`#RRGGBBAA` (converted to Figma rgb 0-1) or raw rgba floats. */
-const Color = z.union([
-  z.string().regex(/^#[0-9a-fA-F]{3,8}$/, "expected #RRGGBB or #RRGGBBAA hex"),
-  z.object({ r: z.number(), g: z.number(), b: z.number(), a: z.number().optional() }),
-]);
-
-const Paint = z
-  .object({
-    type: z
-      .enum(["SOLID", "GRADIENT_LINEAR", "GRADIENT_RADIAL", "GRADIENT_ANGULAR", "GRADIENT_DIAMOND", "IMAGE"])
-      .optional(),
-    color: Color.optional().describe("SOLID paint color, #RRGGBB"),
-    opacity: z.number().min(0).max(1).optional(),
-  })
-  .passthrough();
-
-const FontName = z
-  .object({ family: z.string(), style: z.string().describe('face name, e.g. "Regular", "Bold Italic"') })
-  .describe("font; loaded automatically before write");
-
-// Figma types these as {value, unit} objects, NOT plain numbers — a bare number
-// is accepted as a PIXELS shorthand (coerced plugin-side) so the common case
-// stays terse, but the object form is needed for PERCENT / AUTO.
-const LetterSpacing = z.union([
-  z.number(),
-  z.object({ value: z.number(), unit: z.enum(["PIXELS", "PERCENT"]) }),
-]);
-
-const LineHeight = z.union([
-  z.number(),
-  z.object({ value: z.number(), unit: z.enum(["PIXELS", "PERCENT"]) }),
-  z.object({ unit: z.literal("AUTO") }),
-]);
-
-// ── shared field groups (raw Zod shapes, spread into each type) ────────────
-
-const baseFields = {
-  name: z.string().optional(),
-  x: z.number().optional().describe("parent-relative x (ignored inside an auto-layout parent)"),
-  y: z.number().optional().describe("parent-relative y (ignored inside an auto-layout parent)"),
-  opacity: z.number().min(0).max(1).optional(),
-  rotation: z.number().optional().describe("degrees"),
-  visible: z.boolean().optional(),
-  locked: z.boolean().optional(),
-  blendMode: z.string().optional(),
-  parentId: z.string().optional().describe("container to append into; default current page. short ids (n0) or full ids"),
-  index: z.number().int().min(0).optional().describe("position among siblings"),
+// ── hand-authored notes (the non-obvious "why", which types can't carry) ──────
+const NOTES: Record<string, string> = {
+  x: "parent-relative x (ignored inside an auto-layout parent)",
+  y: "parent-relative y (ignored inside an auto-layout parent)",
+  rotation: "degrees",
+  layoutMode: "turns on auto-layout",
+  primaryAxisSizingMode: "AUTO = hug contents",
+  counterAxisSizingMode: "AUTO = hug contents",
+  layoutSizingHorizontal: "FILL/HUG require an auto-layout parent",
+  layoutSizingVertical: "FILL/HUG require an auto-layout parent",
+  itemSpacing: "gap between children (auto-layout)",
+  characters: "the text content; loads the node's font for you",
+  fills: "paints; a #RRGGBB hex on a SOLID color is converted to Figma rgb 0-1",
+  strokes: "paints; #RRGGBB hex converted to Figma rgb 0-1",
+  letterSpacing: "number = PIXELS; {value,unit:'PERCENT'} for em-relative",
+  lineHeight: "number = PIXELS; {value,unit:'PERCENT'} or {unit:'AUTO'}",
 };
 
-const sizeFields = {
-  width: z.number().positive().optional().describe("routed through resize()"),
-  height: z.number().positive().optional().describe("routed through resize()"),
-};
-
-const paintFields = {
-  fills: z.array(Paint).optional(),
-  strokes: z.array(Paint).optional(),
-  strokeWeight: z.number().min(0).optional(),
-  strokeAlign: z.enum(["INSIDE", "OUTSIDE", "CENTER"]).optional(),
-};
-
-const cornerFields = {
-  cornerRadius: z.number().min(0).optional(),
-  topLeftRadius: z.number().min(0).optional(),
-  topRightRadius: z.number().min(0).optional(),
-  bottomLeftRadius: z.number().min(0).optional(),
-  bottomRightRadius: z.number().min(0).optional(),
-};
-
-const autoLayoutFields = {
-  layoutMode: z.enum(["NONE", "HORIZONTAL", "VERTICAL"]).optional().describe("turns on auto-layout"),
-  primaryAxisAlignItems: z.enum(["MIN", "CENTER", "MAX", "SPACE_BETWEEN"]).optional(),
-  counterAxisAlignItems: z.enum(["MIN", "CENTER", "MAX", "BASELINE"]).optional(),
-  primaryAxisSizingMode: z.enum(["FIXED", "AUTO"]).optional().describe("AUTO = hug contents"),
-  counterAxisSizingMode: z.enum(["FIXED", "AUTO"]).optional(),
-  layoutSizingHorizontal: z.enum(["FIXED", "HUG", "FILL"]).optional(),
-  layoutSizingVertical: z.enum(["FIXED", "HUG", "FILL"]).optional(),
-  itemSpacing: z.number().optional().describe("gap between children"),
-  paddingLeft: z.number().optional(),
-  paddingRight: z.number().optional(),
-  paddingTop: z.number().optional(),
-  paddingBottom: z.number().optional(),
-  clipsContent: z.boolean().optional(),
-};
-
-const textFields = {
-  characters: z.string().describe("the text content; loads the node's font for you"),
-  fontName: FontName.optional(),
-  fontSize: z.number().positive().optional(),
-  textAlignHorizontal: z.enum(["LEFT", "CENTER", "RIGHT", "JUSTIFIED"]).optional(),
-  textAlignVertical: z.enum(["TOP", "CENTER", "BOTTOM"]).optional(),
-  letterSpacing: LetterSpacing.optional().describe("number = PIXELS; {value,unit:'PERCENT'} for em-relative"),
-  lineHeight: LineHeight.optional().describe("number = PIXELS; {value,unit:'PERCENT'} or {unit:'AUTO'}"),
-  textCase: z.enum(["ORIGINAL", "UPPER", "LOWER", "TITLE"]).optional(),
-  textDecoration: z.enum(["NONE", "UNDERLINE", "STRIKETHROUGH"]).optional(),
-};
-
+// ── synthetic fields consumed by the spec itself, not written onto the node ───
+const parentId = z.string().optional().describe("container to append into; default current page. short ids (n0) or full ids");
+const index = z.number().int().min(0).optional().describe("position among siblings");
+const width = z.number().positive().optional().describe("routed through resize()");
+const height = z.number().positive().optional().describe("routed through resize()");
+const componentId = z.string().optional().describe("local COMPONENT id (from get_local_components)");
+const componentKey = z.string().optional().describe("published library component key");
 // `children` is the same union, lazily referenced so the recursive type resolves.
-const childrenField = {
-  children: z.array(z.lazy((): z.ZodTypeAny => writeNodeUnion)).optional().describe("nested specs, created recursively inside this node"),
+const children = z.array(z.lazy((): z.ZodTypeAny => writeNodeUnion)).optional().describe("nested specs, created recursively inside this node");
+
+const CONTAINER_TYPES = new Set<NodeType>(["FRAME", "COMPONENT", "SECTION", "INSTANCE"]);
+const REQUIRED: Partial<Record<NodeType, Set<string>>> = { TEXT: new Set(["characters"]) };
+
+// Range constraints Figma enforces at runtime but doesn't encode in its types
+// (it types these as bare `number`) — restored so the gate rejects them up front.
+const FIELD_OVERRIDES: Record<string, z.ZodTypeAny> = {
+  opacity: z.number().min(0).max(1),
+  cornerRadius: z.number().min(0),
+  strokeWeight: z.number().min(0),
 };
 
 // Keys that are read-only or read-format-only — surfaced as a clear redirect
@@ -144,6 +83,34 @@ export const READ_ONLY_KEYS: Record<string, string> = {
   id: "assigned by Figma",
 };
 
+/** Compose one node type's schema: generated fields (optional + notes) + synthetic spec fields. */
+function compose(type: NodeType): z.ZodTypeAny {
+  const gen = GENERATED_FIELDS[type] ?? {};
+  const required = REQUIRED[type] ?? new Set<string>();
+  const shape: Record<string, z.ZodTypeAny> = { type: z.literal(type) };
+  for (const [key, generated] of Object.entries(gen)) {
+    const base = FIELD_OVERRIDES[key] ?? generated;
+    let field = required.has(key) ? base : base.optional();
+    if (NOTES[key]) field = field.describe(NOTES[key]);
+    shape[key] = field;
+  }
+  shape.parentId = parentId;
+  shape.index = index;
+  shape.width = width;
+  shape.height = height;
+  if (CONTAINER_TYPES.has(type)) shape.children = children;
+  if (type === "INSTANCE") {
+    shape.componentId = componentId;
+    shape.componentKey = componentKey;
+  }
+  return z.object(shape).passthrough();
+}
+
+/** Per-type spec schemas. The map IS the doc source and the validation source. */
+export const NODE_SCHEMAS = Object.fromEntries(
+  NODE_TYPES.map((t) => [t, compose(t)]),
+) as Record<NodeType, z.ZodTypeAny>;
+
 /** Reject known read-only / read-format keys with a redirect message (the input grammar the agent used). */
 function rejectReadOnly(spec: Record<string, unknown>, ctx: z.RefinementCtx): void {
   for (const key of Object.keys(spec)) {
@@ -153,45 +120,9 @@ function rejectReadOnly(spec: Record<string, unknown>, ctx: z.RefinementCtx): vo
   }
 }
 
-// ── per-type schemas ────────────────────────────────────────────────────────
-
-const containerExtras = { ...sizeFields, ...paintFields, ...cornerFields, ...autoLayoutFields, ...childrenField };
-const shapeExtras = { ...sizeFields, ...paintFields };
-
-// Per-type members are PLAIN passthrough objects (no .superRefine) — a
-// discriminatedUnion needs raw ZodObject members to read the `type` literal;
-// wrapping them in an effect (refine) would hide their `.shape`. Cross-field
-// rules (read-only redirects, INSTANCE source) ride on a single top-level
-// refine over the union instead.
-
-/** Per-type spec schemas. The map IS the doc source and the validation source. */
-export const NODE_SCHEMAS = {
-  FRAME: z.object({ type: z.literal("FRAME"), ...baseFields, ...containerExtras }).passthrough(),
-  COMPONENT: z.object({ type: z.literal("COMPONENT"), ...baseFields, ...containerExtras }).passthrough(),
-  SECTION: z.object({ type: z.literal("SECTION"), ...baseFields, ...sizeFields, ...paintFields, ...childrenField }).passthrough(),
-  TEXT: z.object({ type: z.literal("TEXT"), ...baseFields, ...sizeFields, fills: paintFields.fills, ...textFields }).passthrough(),
-  RECTANGLE: z.object({ type: z.literal("RECTANGLE"), ...baseFields, ...shapeExtras, ...cornerFields }).passthrough(),
-  ELLIPSE: z.object({ type: z.literal("ELLIPSE"), ...baseFields, ...shapeExtras }).passthrough(),
-  POLYGON: z.object({ type: z.literal("POLYGON"), ...baseFields, ...shapeExtras }).passthrough(),
-  STAR: z.object({ type: z.literal("STAR"), ...baseFields, ...shapeExtras }).passthrough(),
-  LINE: z.object({ type: z.literal("LINE"), ...baseFields, ...paintFields }).passthrough(),
-  VECTOR: z.object({ type: z.literal("VECTOR"), ...baseFields, ...shapeExtras }).passthrough(),
-  SLICE: z.object({ type: z.literal("SLICE"), ...baseFields, ...sizeFields }).passthrough(),
-  INSTANCE: z
-    .object({
-      type: z.literal("INSTANCE"),
-      componentId: z.string().optional().describe("local COMPONENT id (from get_local_components)"),
-      componentKey: z.string().optional().describe("published library component key"),
-      ...baseFields,
-      ...sizeFields,
-      ...childrenField,
-    })
-    .passthrough(),
-} satisfies Record<NodeType, z.ZodTypeAny>;
-
 /** Discriminated union over `type` + cross-field rules — validates one node spec (recursive via children). */
 export const writeNodeUnion: z.ZodTypeAny = z.lazy(() =>
-  z.discriminatedUnion("type", Object.values(NODE_SCHEMAS) as any).superRefine((spec: any, ctx) => {
+  z.discriminatedUnion("type", NODE_TYPES.map((t) => NODE_SCHEMAS[t]) as any).superRefine((spec: any, ctx) => {
     rejectReadOnly(spec, ctx);
     if (spec.type === "INSTANCE" && !spec.componentId && !spec.componentKey) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "INSTANCE needs componentId (local) or componentKey (published)", path: ["componentId"] });
@@ -230,6 +161,8 @@ function renderType(schema: z.ZodTypeAny): string {
       return JSON.stringify(def.value);
     case "ZodArray":
       return `${renderType(def.type)}[]`;
+    case "ZodRecord":
+      return "object";
     case "ZodObject": {
       const keys = Object.keys(def.shape());
       return `{${keys.join(",")}}`;
@@ -241,7 +174,7 @@ function renderType(schema: z.ZodTypeAny): string {
   }
 }
 
-/** Unwrap .superRefine/.passthrough effect wrappers down to the base ZodObject. */
+/** Unwrap .passthrough()/effect wrappers down to the base ZodObject. */
 function unwrapObject(schema: z.ZodTypeAny): z.ZodObject<any> | null {
   let s: any = schema;
   while (s && s._def) {
@@ -286,16 +219,20 @@ export function listNodeTypes(): string {
 // check. But two checks need no round-trip and reuse the schemas above:
 //   • read-only / read-format roots (style, absoluteBoundingBox, ...) — reject
 //     with the same redirect, so editing a read-only field fails loudly.
-//   • type-agnostic field values — opacity (0..1), cornerRadius (≥0), enums like
-//     layoutMode, colors — validated by the path's leaf name regardless of node
-//     type, since their constraint is the same on every type that has them.
+//   • type-agnostic field values — a field's value-shape is the same wherever it
+//     appears, so the path's leaf name picks the schema regardless of node type.
 // Anything else passes (null) and the plugin handles it, preserving the
 // permissive contract.
 
-/** Type-agnostic field schemas, keyed by leaf name — the value-shape checks shared with write. */
-const FIELD_SCHEMAS: Record<string, z.ZodTypeAny> = {
-  ...baseFields, ...sizeFields, ...paintFields, ...cornerFields, ...autoLayoutFields, ...textFields,
-};
+/** Type-agnostic field schemas, keyed by leaf name — merged across every node type's generated fields. */
+const FIELD_SCHEMAS: Record<string, z.ZodTypeAny> = {};
+for (const type of NODE_TYPES) {
+  for (const [key, schema] of Object.entries(GENERATED_FIELDS[type] ?? {})) {
+    if (!(key in FIELD_SCHEMAS)) FIELD_SCHEMAS[key] = FIELD_OVERRIDES[key] ?? schema;
+  }
+}
+FIELD_SCHEMAS.width = z.number().positive();
+FIELD_SCHEMAS.height = z.number().positive();
 
 /**
  * Validate one edit_nodes `{path, new}` without reading the node. Returns an

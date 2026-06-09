@@ -3,7 +3,7 @@
 // src/talk_to_figma_mcp/server.ts
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { z as z2 } from "zod";
+import { z as z4 } from "zod";
 import WebSocket from "ws";
 import { v4 as uuidv4 } from "uuid";
 import { writeFile, readFile, mkdir } from "fs/promises";
@@ -371,21 +371,13 @@ function resolveShortIdsInParams(value, key = "") {
 }
 
 // src/talk_to_figma_mcp/write_schema.ts
+import { z as z3 } from "zod";
+
+// src/talk_to_figma_mcp/write_schema.generated.ts
+import { z as z2 } from "zod";
+
+// src/talk_to_figma_mcp/shared-schemas.ts
 import { z } from "zod";
-var NODE_TYPES = [
-  "FRAME",
-  "TEXT",
-  "RECTANGLE",
-  "ELLIPSE",
-  "LINE",
-  "STAR",
-  "POLYGON",
-  "VECTOR",
-  "COMPONENT",
-  "SECTION",
-  "SLICE",
-  "INSTANCE"
-];
 var Color = z.union([
   z.string().regex(/^#[0-9a-fA-F]{3,8}$/, "expected #RRGGBB or #RRGGBBAA hex"),
   z.object({ r: z.number(), g: z.number(), b: z.number(), a: z.number().optional() })
@@ -405,63 +397,633 @@ var LineHeight = z.union([
   z.object({ value: z.number(), unit: z.enum(["PIXELS", "PERCENT"]) }),
   z.object({ unit: z.literal("AUTO") })
 ]);
-var baseFields = {
-  name: z.string().optional(),
-  x: z.number().optional().describe("parent-relative x (ignored inside an auto-layout parent)"),
-  y: z.number().optional().describe("parent-relative y (ignored inside an auto-layout parent)"),
-  opacity: z.number().min(0).max(1).optional(),
-  rotation: z.number().optional().describe("degrees"),
-  visible: z.boolean().optional(),
-  locked: z.boolean().optional(),
-  blendMode: z.string().optional(),
-  parentId: z.string().optional().describe("container to append into; default current page. short ids (n0) or full ids"),
-  index: z.number().int().min(0).optional().describe("position among siblings")
+var Effect = z.object({ type: z.string().describe("DROP_SHADOW | INNER_SHADOW | LAYER_BLUR | BACKGROUND_BLUR | ...") }).passthrough();
+
+// src/talk_to_figma_mcp/write_schema.generated.ts
+var StrokeCap = z2.enum(["NONE", "ROUND", "SQUARE", "ARROW_LINES", "ARROW_EQUILATERAL", "DIAMOND_FILLED", "TRIANGLE_FILLED", "CIRCLE_FILLED"]);
+var StrokeJoin = z2.enum(["ROUND", "MITER", "BEVEL"]);
+var StrokeAlign = z2.enum(["CENTER", "INSIDE", "OUTSIDE"]);
+var LayoutSizingHorizontal = z2.enum(["FIXED", "HUG", "FILL"]);
+var LayoutAlign = z2.enum(["CENTER", "MIN", "MAX", "STRETCH", "INHERIT"]);
+var LayoutPositioning = z2.enum(["AUTO", "ABSOLUTE"]);
+var GridChildHorizontalAlign = z2.enum(["CENTER", "MIN", "MAX", "AUTO"]);
+var LayoutMode = z2.enum(["NONE", "HORIZONTAL", "VERTICAL", "GRID"]);
+var PrimaryAxisSizingMode = z2.enum(["FIXED", "AUTO"]);
+var LayoutWrap = z2.enum(["NO_WRAP", "WRAP"]);
+var PrimaryAxisAlignItems = z2.enum(["CENTER", "MIN", "MAX", "SPACE_BETWEEN"]);
+var CounterAxisAlignItems = z2.enum(["CENTER", "MIN", "MAX", "BASELINE"]);
+var CounterAxisAlignContent = z2.enum(["AUTO", "SPACE_BETWEEN"]);
+var GridAutoTracks = z2.enum(["NONE", "ROWS"]);
+var GridItemsPositioning = z2.enum(["MANUAL", "ROW_AUTO_FLOW"]);
+var Unit = z2.enum(["PIXELS", "PERCENT"]);
+var MaskType = z2.enum(["ALPHA", "VECTOR", "LUMINANCE"]);
+var BlendMode = z2.enum(["PASS_THROUGH", "NORMAL", "DARKEN", "MULTIPLY", "LINEAR_BURN", "COLOR_BURN", "LIGHTEN", "SCREEN", "LINEAR_DODGE", "COLOR_DODGE", "OVERLAY", "SOFT_LIGHT", "HARD_LIGHT", "DIFFERENCE", "EXCLUSION", "HUE", "SATURATION", "COLOR", "LUMINOSITY"]);
+var ConstraintType = z2.enum(["CENTER", "MIN", "MAX", "STRETCH", "SCALE"]);
+var Constraints = z2.object({ "horizontal": ConstraintType, "vertical": ConstraintType }).passthrough();
+var GridTrackSize = z2.object({ "value": z2.number().nullable().optional(), "type": z2.enum(["FIXED", "HUG", "FLEX"]) }).passthrough();
+var OverflowDirection = z2.enum(["NONE", "HORIZONTAL", "VERTICAL", "BOTH"]);
+var RGB = z2.object({ "r": z2.number(), "g": z2.number(), "b": z2.number() }).passthrough();
+var SolidPaint = z2.object({ "type": z2.literal("SOLID"), "color": RGB, "visible": z2.boolean().nullable().optional(), "opacity": z2.number().nullable().optional(), "blendMode": BlendMode.nullable().optional(), "boundVariables": z2.record(z2.unknown()).nullable().optional() }).passthrough();
+var HyperlinkTarget = z2.object({ "type": z2.enum(["URL", "NODE"]), "value": z2.string() }).passthrough();
+var ArcData = z2.object({ "startingAngle": z2.number(), "endingAngle": z2.number(), "innerRadius": z2.number() }).passthrough();
+var VectorPath = z2.object({ "windingRule": z2.enum(["NONE", "NONZERO", "EVENODD"]), "data": z2.string() }).passthrough();
+var DocumentationLink = z2.object({ "uri": z2.string() }).passthrough();
+var GENERATED_FIELDS = {
+  FRAME: {
+    "blendMode": BlendMode,
+    "bottomLeftRadius": z2.number(),
+    "bottomRightRadius": z2.number(),
+    "clipsContent": z2.boolean(),
+    "constraints": Constraints,
+    "cornerRadius": z2.number(),
+    "cornerSmoothing": z2.number(),
+    "counterAxisAlignContent": CounterAxisAlignContent,
+    "counterAxisAlignItems": CounterAxisAlignItems,
+    "counterAxisSizingMode": PrimaryAxisSizingMode,
+    "counterAxisSpacing": z2.number().nullable(),
+    "effects": z2.array(Effect),
+    "expanded": z2.boolean(),
+    "fills": z2.array(Paint),
+    "gridAutoTracks": GridAutoTracks,
+    "gridChildHorizontalAlign": GridChildHorizontalAlign,
+    "gridChildVerticalAlign": GridChildHorizontalAlign,
+    "gridColumnCount": z2.number(),
+    "gridColumnGap": z2.number(),
+    "gridColumnSizes": z2.array(GridTrackSize),
+    "gridColumnSpan": z2.number(),
+    "gridItemsPositioning": GridItemsPositioning,
+    "gridRowCount": z2.number(),
+    "gridRowGap": z2.number(),
+    "gridRowSizes": z2.array(GridTrackSize),
+    "gridRowSpan": z2.number(),
+    "isMask": z2.boolean(),
+    "itemReverseZIndex": z2.boolean(),
+    "itemSpacing": z2.number(),
+    "layoutAlign": LayoutAlign,
+    "layoutGrow": z2.number(),
+    "layoutMode": LayoutMode,
+    "layoutPositioning": LayoutPositioning,
+    "layoutSizingHorizontal": LayoutSizingHorizontal,
+    "layoutSizingVertical": LayoutSizingHorizontal,
+    "layoutWrap": LayoutWrap,
+    "locked": z2.boolean(),
+    "maskType": MaskType,
+    "maxHeight": z2.number().nullable(),
+    "maxWidth": z2.number().nullable(),
+    "minHeight": z2.number().nullable(),
+    "minWidth": z2.number().nullable(),
+    "name": z2.string(),
+    "numberOfFixedChildren": z2.number(),
+    "opacity": z2.number(),
+    "overflowDirection": OverflowDirection,
+    "paddingBottom": z2.number(),
+    "paddingLeft": z2.number(),
+    "paddingRight": z2.number(),
+    "paddingTop": z2.number(),
+    "primaryAxisAlignItems": PrimaryAxisAlignItems,
+    "primaryAxisSizingMode": PrimaryAxisSizingMode,
+    "rotation": z2.number(),
+    "strokeAlign": StrokeAlign,
+    "strokeBottomWeight": z2.number(),
+    "strokeCap": StrokeCap,
+    "strokeJoin": StrokeJoin,
+    "strokeLeftWeight": z2.number(),
+    "strokeMiterLimit": z2.number(),
+    "strokeRightWeight": z2.number(),
+    "strokeTopWeight": z2.number(),
+    "strokeWeight": z2.number(),
+    "strokes": z2.array(Paint),
+    "strokesIncludedInLayout": z2.boolean(),
+    "topLeftRadius": z2.number(),
+    "topRightRadius": z2.number(),
+    "visible": z2.boolean(),
+    "x": z2.number(),
+    "y": z2.number()
+  },
+  TEXT: {
+    "autoRename": z2.boolean(),
+    "blendMode": BlendMode,
+    "characters": z2.string(),
+    "constraints": Constraints,
+    "effects": z2.array(Effect),
+    "fills": z2.array(Paint),
+    "fontName": FontName,
+    "fontSize": z2.number(),
+    "gridChildHorizontalAlign": GridChildHorizontalAlign,
+    "gridChildVerticalAlign": GridChildHorizontalAlign,
+    "gridColumnSpan": z2.number(),
+    "gridRowSpan": z2.number(),
+    "hangingList": z2.boolean(),
+    "hangingPunctuation": z2.boolean(),
+    "hyperlink": HyperlinkTarget.nullable(),
+    "isMask": z2.boolean(),
+    "layoutAlign": LayoutAlign,
+    "layoutGrow": z2.number(),
+    "layoutPositioning": LayoutPositioning,
+    "layoutSizingHorizontal": LayoutSizingHorizontal,
+    "layoutSizingVertical": LayoutSizingHorizontal,
+    "leadingTrim": z2.enum(["NONE", "CAP_HEIGHT"]),
+    "letterSpacing": LetterSpacing,
+    "lineHeight": LineHeight,
+    "listSpacing": z2.number(),
+    "locked": z2.boolean(),
+    "maskType": MaskType,
+    "maxHeight": z2.number().nullable(),
+    "maxLines": z2.number().nullable(),
+    "maxWidth": z2.number().nullable(),
+    "minHeight": z2.number().nullable(),
+    "minWidth": z2.number().nullable(),
+    "name": z2.string(),
+    "opacity": z2.number(),
+    "paragraphIndent": z2.number(),
+    "paragraphSpacing": z2.number(),
+    "rotation": z2.number(),
+    "strokeAlign": StrokeAlign,
+    "strokeCap": StrokeCap,
+    "strokeJoin": StrokeJoin,
+    "strokeMiterLimit": z2.number(),
+    "strokeWeight": z2.number(),
+    "strokes": z2.array(Paint),
+    "textAlignHorizontal": z2.enum(["CENTER", "LEFT", "RIGHT", "JUSTIFIED"]),
+    "textAlignVertical": z2.enum(["CENTER", "TOP", "BOTTOM"]),
+    "textAutoResize": z2.enum(["NONE", "WIDTH_AND_HEIGHT", "HEIGHT", "TRUNCATE"]),
+    "textCase": z2.enum(["ORIGINAL", "UPPER", "LOWER", "TITLE", "SMALL_CAPS", "SMALL_CAPS_FORCED"]),
+    "textDecoration": z2.enum(["NONE", "UNDERLINE", "STRIKETHROUGH"]),
+    "textDecorationColor": z2.union([z2.object({ "value": SolidPaint }).passthrough(), z2.object({ "value": z2.literal("AUTO") }).passthrough()]).nullable(),
+    "textDecorationOffset": z2.union([z2.object({ "value": z2.number(), "unit": Unit }).passthrough(), z2.object({ "unit": z2.literal("AUTO") }).passthrough()]).nullable(),
+    "textDecorationSkipInk": z2.boolean().nullable(),
+    "textDecorationStyle": z2.enum(["SOLID", "WAVY", "DOTTED"]).nullable(),
+    "textDecorationThickness": z2.union([z2.object({ "value": z2.number(), "unit": Unit }).passthrough(), z2.object({ "unit": z2.literal("AUTO") }).passthrough()]).nullable(),
+    "textTruncation": z2.enum(["DISABLED", "ENDING"]),
+    "visible": z2.boolean(),
+    "x": z2.number(),
+    "y": z2.number()
+  },
+  RECTANGLE: {
+    "blendMode": BlendMode,
+    "bottomLeftRadius": z2.number(),
+    "bottomRightRadius": z2.number(),
+    "constraints": Constraints,
+    "cornerRadius": z2.number(),
+    "cornerSmoothing": z2.number(),
+    "effects": z2.array(Effect),
+    "fills": z2.array(Paint),
+    "gridChildHorizontalAlign": GridChildHorizontalAlign,
+    "gridChildVerticalAlign": GridChildHorizontalAlign,
+    "gridColumnSpan": z2.number(),
+    "gridRowSpan": z2.number(),
+    "isMask": z2.boolean(),
+    "layoutAlign": LayoutAlign,
+    "layoutGrow": z2.number(),
+    "layoutPositioning": LayoutPositioning,
+    "layoutSizingHorizontal": LayoutSizingHorizontal,
+    "layoutSizingVertical": LayoutSizingHorizontal,
+    "locked": z2.boolean(),
+    "maskType": MaskType,
+    "maxHeight": z2.number().nullable(),
+    "maxWidth": z2.number().nullable(),
+    "minHeight": z2.number().nullable(),
+    "minWidth": z2.number().nullable(),
+    "name": z2.string(),
+    "opacity": z2.number(),
+    "rotation": z2.number(),
+    "strokeAlign": StrokeAlign,
+    "strokeBottomWeight": z2.number(),
+    "strokeCap": StrokeCap,
+    "strokeJoin": StrokeJoin,
+    "strokeLeftWeight": z2.number(),
+    "strokeMiterLimit": z2.number(),
+    "strokeRightWeight": z2.number(),
+    "strokeTopWeight": z2.number(),
+    "strokeWeight": z2.number(),
+    "strokes": z2.array(Paint),
+    "topLeftRadius": z2.number(),
+    "topRightRadius": z2.number(),
+    "visible": z2.boolean(),
+    "x": z2.number(),
+    "y": z2.number()
+  },
+  ELLIPSE: {
+    "arcData": ArcData,
+    "blendMode": BlendMode,
+    "constraints": Constraints,
+    "cornerRadius": z2.number(),
+    "cornerSmoothing": z2.number(),
+    "effects": z2.array(Effect),
+    "fills": z2.array(Paint),
+    "gridChildHorizontalAlign": GridChildHorizontalAlign,
+    "gridChildVerticalAlign": GridChildHorizontalAlign,
+    "gridColumnSpan": z2.number(),
+    "gridRowSpan": z2.number(),
+    "isMask": z2.boolean(),
+    "layoutAlign": LayoutAlign,
+    "layoutGrow": z2.number(),
+    "layoutPositioning": LayoutPositioning,
+    "layoutSizingHorizontal": LayoutSizingHorizontal,
+    "layoutSizingVertical": LayoutSizingHorizontal,
+    "locked": z2.boolean(),
+    "maskType": MaskType,
+    "maxHeight": z2.number().nullable(),
+    "maxWidth": z2.number().nullable(),
+    "minHeight": z2.number().nullable(),
+    "minWidth": z2.number().nullable(),
+    "name": z2.string(),
+    "opacity": z2.number(),
+    "rotation": z2.number(),
+    "strokeAlign": StrokeAlign,
+    "strokeCap": StrokeCap,
+    "strokeJoin": StrokeJoin,
+    "strokeMiterLimit": z2.number(),
+    "strokeWeight": z2.number(),
+    "strokes": z2.array(Paint),
+    "visible": z2.boolean(),
+    "x": z2.number(),
+    "y": z2.number()
+  },
+  LINE: {
+    "blendMode": BlendMode,
+    "constraints": Constraints,
+    "effects": z2.array(Effect),
+    "fills": z2.array(Paint),
+    "gridChildHorizontalAlign": GridChildHorizontalAlign,
+    "gridChildVerticalAlign": GridChildHorizontalAlign,
+    "gridColumnSpan": z2.number(),
+    "gridRowSpan": z2.number(),
+    "isMask": z2.boolean(),
+    "layoutAlign": LayoutAlign,
+    "layoutGrow": z2.number(),
+    "layoutPositioning": LayoutPositioning,
+    "layoutSizingHorizontal": LayoutSizingHorizontal,
+    "layoutSizingVertical": LayoutSizingHorizontal,
+    "locked": z2.boolean(),
+    "maskType": MaskType,
+    "maxHeight": z2.number().nullable(),
+    "maxWidth": z2.number().nullable(),
+    "minHeight": z2.number().nullable(),
+    "minWidth": z2.number().nullable(),
+    "name": z2.string(),
+    "opacity": z2.number(),
+    "rotation": z2.number(),
+    "strokeAlign": StrokeAlign,
+    "strokeCap": StrokeCap,
+    "strokeJoin": StrokeJoin,
+    "strokeMiterLimit": z2.number(),
+    "strokeWeight": z2.number(),
+    "strokes": z2.array(Paint),
+    "visible": z2.boolean(),
+    "x": z2.number(),
+    "y": z2.number()
+  },
+  STAR: {
+    "blendMode": BlendMode,
+    "constraints": Constraints,
+    "cornerRadius": z2.number(),
+    "cornerSmoothing": z2.number(),
+    "effects": z2.array(Effect),
+    "fills": z2.array(Paint),
+    "gridChildHorizontalAlign": GridChildHorizontalAlign,
+    "gridChildVerticalAlign": GridChildHorizontalAlign,
+    "gridColumnSpan": z2.number(),
+    "gridRowSpan": z2.number(),
+    "innerRadius": z2.number(),
+    "isMask": z2.boolean(),
+    "layoutAlign": LayoutAlign,
+    "layoutGrow": z2.number(),
+    "layoutPositioning": LayoutPositioning,
+    "layoutSizingHorizontal": LayoutSizingHorizontal,
+    "layoutSizingVertical": LayoutSizingHorizontal,
+    "locked": z2.boolean(),
+    "maskType": MaskType,
+    "maxHeight": z2.number().nullable(),
+    "maxWidth": z2.number().nullable(),
+    "minHeight": z2.number().nullable(),
+    "minWidth": z2.number().nullable(),
+    "name": z2.string(),
+    "opacity": z2.number(),
+    "pointCount": z2.number(),
+    "rotation": z2.number(),
+    "strokeAlign": StrokeAlign,
+    "strokeCap": StrokeCap,
+    "strokeJoin": StrokeJoin,
+    "strokeMiterLimit": z2.number(),
+    "strokeWeight": z2.number(),
+    "strokes": z2.array(Paint),
+    "visible": z2.boolean(),
+    "x": z2.number(),
+    "y": z2.number()
+  },
+  POLYGON: {
+    "blendMode": BlendMode,
+    "constraints": Constraints,
+    "cornerRadius": z2.number(),
+    "cornerSmoothing": z2.number(),
+    "effects": z2.array(Effect),
+    "fills": z2.array(Paint),
+    "gridChildHorizontalAlign": GridChildHorizontalAlign,
+    "gridChildVerticalAlign": GridChildHorizontalAlign,
+    "gridColumnSpan": z2.number(),
+    "gridRowSpan": z2.number(),
+    "isMask": z2.boolean(),
+    "layoutAlign": LayoutAlign,
+    "layoutGrow": z2.number(),
+    "layoutPositioning": LayoutPositioning,
+    "layoutSizingHorizontal": LayoutSizingHorizontal,
+    "layoutSizingVertical": LayoutSizingHorizontal,
+    "locked": z2.boolean(),
+    "maskType": MaskType,
+    "maxHeight": z2.number().nullable(),
+    "maxWidth": z2.number().nullable(),
+    "minHeight": z2.number().nullable(),
+    "minWidth": z2.number().nullable(),
+    "name": z2.string(),
+    "opacity": z2.number(),
+    "pointCount": z2.number(),
+    "rotation": z2.number(),
+    "strokeAlign": StrokeAlign,
+    "strokeCap": StrokeCap,
+    "strokeJoin": StrokeJoin,
+    "strokeMiterLimit": z2.number(),
+    "strokeWeight": z2.number(),
+    "strokes": z2.array(Paint),
+    "visible": z2.boolean(),
+    "x": z2.number(),
+    "y": z2.number()
+  },
+  VECTOR: {
+    "blendMode": BlendMode,
+    "constraints": Constraints,
+    "cornerRadius": z2.number(),
+    "cornerSmoothing": z2.number(),
+    "effects": z2.array(Effect),
+    "fills": z2.array(Paint),
+    "gridChildHorizontalAlign": GridChildHorizontalAlign,
+    "gridChildVerticalAlign": GridChildHorizontalAlign,
+    "gridColumnSpan": z2.number(),
+    "gridRowSpan": z2.number(),
+    "handleMirroring": z2.enum(["NONE", "ANGLE", "ANGLE_AND_LENGTH"]),
+    "isMask": z2.boolean(),
+    "layoutAlign": LayoutAlign,
+    "layoutGrow": z2.number(),
+    "layoutPositioning": LayoutPositioning,
+    "layoutSizingHorizontal": LayoutSizingHorizontal,
+    "layoutSizingVertical": LayoutSizingHorizontal,
+    "locked": z2.boolean(),
+    "maskType": MaskType,
+    "maxHeight": z2.number().nullable(),
+    "maxWidth": z2.number().nullable(),
+    "minHeight": z2.number().nullable(),
+    "minWidth": z2.number().nullable(),
+    "name": z2.string(),
+    "opacity": z2.number(),
+    "rotation": z2.number(),
+    "strokeAlign": StrokeAlign,
+    "strokeCap": StrokeCap,
+    "strokeJoin": StrokeJoin,
+    "strokeMiterLimit": z2.number(),
+    "strokeWeight": z2.number(),
+    "strokes": z2.array(Paint),
+    "vectorPaths": z2.array(VectorPath),
+    "visible": z2.boolean(),
+    "x": z2.number(),
+    "y": z2.number()
+  },
+  COMPONENT: {
+    "blendMode": BlendMode,
+    "bottomLeftRadius": z2.number(),
+    "bottomRightRadius": z2.number(),
+    "clipsContent": z2.boolean(),
+    "constraints": Constraints,
+    "cornerRadius": z2.number(),
+    "cornerSmoothing": z2.number(),
+    "counterAxisAlignContent": CounterAxisAlignContent,
+    "counterAxisAlignItems": CounterAxisAlignItems,
+    "counterAxisSizingMode": PrimaryAxisSizingMode,
+    "counterAxisSpacing": z2.number().nullable(),
+    "description": z2.string(),
+    "descriptionMarkdown": z2.string(),
+    "documentationLinks": z2.array(DocumentationLink),
+    "effects": z2.array(Effect),
+    "expanded": z2.boolean(),
+    "fills": z2.array(Paint),
+    "gridAutoTracks": GridAutoTracks,
+    "gridChildHorizontalAlign": GridChildHorizontalAlign,
+    "gridChildVerticalAlign": GridChildHorizontalAlign,
+    "gridColumnCount": z2.number(),
+    "gridColumnGap": z2.number(),
+    "gridColumnSizes": z2.array(GridTrackSize),
+    "gridColumnSpan": z2.number(),
+    "gridItemsPositioning": GridItemsPositioning,
+    "gridRowCount": z2.number(),
+    "gridRowGap": z2.number(),
+    "gridRowSizes": z2.array(GridTrackSize),
+    "gridRowSpan": z2.number(),
+    "isMask": z2.boolean(),
+    "itemReverseZIndex": z2.boolean(),
+    "itemSpacing": z2.number(),
+    "layoutAlign": LayoutAlign,
+    "layoutGrow": z2.number(),
+    "layoutMode": LayoutMode,
+    "layoutPositioning": LayoutPositioning,
+    "layoutSizingHorizontal": LayoutSizingHorizontal,
+    "layoutSizingVertical": LayoutSizingHorizontal,
+    "layoutWrap": LayoutWrap,
+    "locked": z2.boolean(),
+    "maskType": MaskType,
+    "maxHeight": z2.number().nullable(),
+    "maxWidth": z2.number().nullable(),
+    "minHeight": z2.number().nullable(),
+    "minWidth": z2.number().nullable(),
+    "name": z2.string(),
+    "numberOfFixedChildren": z2.number(),
+    "opacity": z2.number(),
+    "overflowDirection": OverflowDirection,
+    "paddingBottom": z2.number(),
+    "paddingLeft": z2.number(),
+    "paddingRight": z2.number(),
+    "paddingTop": z2.number(),
+    "primaryAxisAlignItems": PrimaryAxisAlignItems,
+    "primaryAxisSizingMode": PrimaryAxisSizingMode,
+    "rotation": z2.number(),
+    "strokeAlign": StrokeAlign,
+    "strokeBottomWeight": z2.number(),
+    "strokeCap": StrokeCap,
+    "strokeJoin": StrokeJoin,
+    "strokeLeftWeight": z2.number(),
+    "strokeMiterLimit": z2.number(),
+    "strokeRightWeight": z2.number(),
+    "strokeTopWeight": z2.number(),
+    "strokeWeight": z2.number(),
+    "strokes": z2.array(Paint),
+    "strokesIncludedInLayout": z2.boolean(),
+    "topLeftRadius": z2.number(),
+    "topRightRadius": z2.number(),
+    "visible": z2.boolean(),
+    "x": z2.number(),
+    "y": z2.number()
+  },
+  SECTION: {
+    "bottomLeftRadius": z2.number(),
+    "bottomRightRadius": z2.number(),
+    "cornerRadius": z2.number(),
+    "cornerSmoothing": z2.number(),
+    "fills": z2.array(Paint),
+    "locked": z2.boolean(),
+    "maxHeight": z2.number().nullable(),
+    "maxWidth": z2.number().nullable(),
+    "minHeight": z2.number().nullable(),
+    "minWidth": z2.number().nullable(),
+    "name": z2.string(),
+    "sectionContentsHidden": z2.boolean(),
+    "strokeAlign": StrokeAlign,
+    "strokeJoin": StrokeJoin,
+    "strokeWeight": z2.number(),
+    "strokes": z2.array(Paint),
+    "topLeftRadius": z2.number(),
+    "topRightRadius": z2.number(),
+    "visible": z2.boolean(),
+    "x": z2.number(),
+    "y": z2.number()
+  },
+  SLICE: {
+    "gridChildHorizontalAlign": GridChildHorizontalAlign,
+    "gridChildVerticalAlign": GridChildHorizontalAlign,
+    "gridColumnSpan": z2.number(),
+    "gridRowSpan": z2.number(),
+    "layoutAlign": LayoutAlign,
+    "layoutGrow": z2.number(),
+    "layoutPositioning": LayoutPositioning,
+    "layoutSizingHorizontal": LayoutSizingHorizontal,
+    "layoutSizingVertical": LayoutSizingHorizontal,
+    "locked": z2.boolean(),
+    "maxHeight": z2.number().nullable(),
+    "maxWidth": z2.number().nullable(),
+    "minHeight": z2.number().nullable(),
+    "minWidth": z2.number().nullable(),
+    "name": z2.string(),
+    "rotation": z2.number(),
+    "visible": z2.boolean(),
+    "x": z2.number(),
+    "y": z2.number()
+  },
+  INSTANCE: {
+    "blendMode": BlendMode,
+    "bottomLeftRadius": z2.number(),
+    "bottomRightRadius": z2.number(),
+    "clipsContent": z2.boolean(),
+    "constraints": Constraints,
+    "cornerRadius": z2.number(),
+    "cornerSmoothing": z2.number(),
+    "counterAxisAlignContent": CounterAxisAlignContent,
+    "counterAxisAlignItems": CounterAxisAlignItems,
+    "counterAxisSizingMode": PrimaryAxisSizingMode,
+    "counterAxisSpacing": z2.number().nullable(),
+    "effects": z2.array(Effect),
+    "expanded": z2.boolean(),
+    "fills": z2.array(Paint),
+    "gridAutoTracks": GridAutoTracks,
+    "gridChildHorizontalAlign": GridChildHorizontalAlign,
+    "gridChildVerticalAlign": GridChildHorizontalAlign,
+    "gridColumnCount": z2.number(),
+    "gridColumnGap": z2.number(),
+    "gridColumnSizes": z2.array(GridTrackSize),
+    "gridColumnSpan": z2.number(),
+    "gridItemsPositioning": GridItemsPositioning,
+    "gridRowCount": z2.number(),
+    "gridRowGap": z2.number(),
+    "gridRowSizes": z2.array(GridTrackSize),
+    "gridRowSpan": z2.number(),
+    "isExposedInstance": z2.boolean(),
+    "isMask": z2.boolean(),
+    "itemReverseZIndex": z2.boolean(),
+    "itemSpacing": z2.number(),
+    "layoutAlign": LayoutAlign,
+    "layoutGrow": z2.number(),
+    "layoutMode": LayoutMode,
+    "layoutPositioning": LayoutPositioning,
+    "layoutSizingHorizontal": LayoutSizingHorizontal,
+    "layoutSizingVertical": LayoutSizingHorizontal,
+    "layoutWrap": LayoutWrap,
+    "locked": z2.boolean(),
+    "maskType": MaskType,
+    "maxHeight": z2.number().nullable(),
+    "maxWidth": z2.number().nullable(),
+    "minHeight": z2.number().nullable(),
+    "minWidth": z2.number().nullable(),
+    "name": z2.string(),
+    "numberOfFixedChildren": z2.number(),
+    "opacity": z2.number(),
+    "overflowDirection": OverflowDirection,
+    "paddingBottom": z2.number(),
+    "paddingLeft": z2.number(),
+    "paddingRight": z2.number(),
+    "paddingTop": z2.number(),
+    "primaryAxisAlignItems": PrimaryAxisAlignItems,
+    "primaryAxisSizingMode": PrimaryAxisSizingMode,
+    "rotation": z2.number(),
+    "scaleFactor": z2.number(),
+    "strokeAlign": StrokeAlign,
+    "strokeBottomWeight": z2.number(),
+    "strokeCap": StrokeCap,
+    "strokeJoin": StrokeJoin,
+    "strokeLeftWeight": z2.number(),
+    "strokeMiterLimit": z2.number(),
+    "strokeRightWeight": z2.number(),
+    "strokeTopWeight": z2.number(),
+    "strokeWeight": z2.number(),
+    "strokes": z2.array(Paint),
+    "strokesIncludedInLayout": z2.boolean(),
+    "topLeftRadius": z2.number(),
+    "topRightRadius": z2.number(),
+    "visible": z2.boolean(),
+    "x": z2.number(),
+    "y": z2.number()
+  }
 };
-var sizeFields = {
-  width: z.number().positive().optional().describe("routed through resize()"),
-  height: z.number().positive().optional().describe("routed through resize()")
+
+// src/talk_to_figma_mcp/write_schema.ts
+var NODE_TYPES = [
+  "FRAME",
+  "TEXT",
+  "RECTANGLE",
+  "ELLIPSE",
+  "LINE",
+  "STAR",
+  "POLYGON",
+  "VECTOR",
+  "COMPONENT",
+  "SECTION",
+  "SLICE",
+  "INSTANCE"
+];
+var NOTES = {
+  x: "parent-relative x (ignored inside an auto-layout parent)",
+  y: "parent-relative y (ignored inside an auto-layout parent)",
+  rotation: "degrees",
+  layoutMode: "turns on auto-layout",
+  primaryAxisSizingMode: "AUTO = hug contents",
+  counterAxisSizingMode: "AUTO = hug contents",
+  layoutSizingHorizontal: "FILL/HUG require an auto-layout parent",
+  layoutSizingVertical: "FILL/HUG require an auto-layout parent",
+  itemSpacing: "gap between children (auto-layout)",
+  characters: "the text content; loads the node's font for you",
+  fills: "paints; a #RRGGBB hex on a SOLID color is converted to Figma rgb 0-1",
+  strokes: "paints; #RRGGBB hex converted to Figma rgb 0-1",
+  letterSpacing: "number = PIXELS; {value,unit:'PERCENT'} for em-relative",
+  lineHeight: "number = PIXELS; {value,unit:'PERCENT'} or {unit:'AUTO'}"
 };
-var paintFields = {
-  fills: z.array(Paint).optional(),
-  strokes: z.array(Paint).optional(),
-  strokeWeight: z.number().min(0).optional(),
-  strokeAlign: z.enum(["INSIDE", "OUTSIDE", "CENTER"]).optional()
-};
-var cornerFields = {
-  cornerRadius: z.number().min(0).optional(),
-  topLeftRadius: z.number().min(0).optional(),
-  topRightRadius: z.number().min(0).optional(),
-  bottomLeftRadius: z.number().min(0).optional(),
-  bottomRightRadius: z.number().min(0).optional()
-};
-var autoLayoutFields = {
-  layoutMode: z.enum(["NONE", "HORIZONTAL", "VERTICAL"]).optional().describe("turns on auto-layout"),
-  primaryAxisAlignItems: z.enum(["MIN", "CENTER", "MAX", "SPACE_BETWEEN"]).optional(),
-  counterAxisAlignItems: z.enum(["MIN", "CENTER", "MAX", "BASELINE"]).optional(),
-  primaryAxisSizingMode: z.enum(["FIXED", "AUTO"]).optional().describe("AUTO = hug contents"),
-  counterAxisSizingMode: z.enum(["FIXED", "AUTO"]).optional(),
-  layoutSizingHorizontal: z.enum(["FIXED", "HUG", "FILL"]).optional(),
-  layoutSizingVertical: z.enum(["FIXED", "HUG", "FILL"]).optional(),
-  itemSpacing: z.number().optional().describe("gap between children"),
-  paddingLeft: z.number().optional(),
-  paddingRight: z.number().optional(),
-  paddingTop: z.number().optional(),
-  paddingBottom: z.number().optional(),
-  clipsContent: z.boolean().optional()
-};
-var textFields = {
-  characters: z.string().describe("the text content; loads the node's font for you"),
-  fontName: FontName.optional(),
-  fontSize: z.number().positive().optional(),
-  textAlignHorizontal: z.enum(["LEFT", "CENTER", "RIGHT", "JUSTIFIED"]).optional(),
-  textAlignVertical: z.enum(["TOP", "CENTER", "BOTTOM"]).optional(),
-  letterSpacing: LetterSpacing.optional().describe("number = PIXELS; {value,unit:'PERCENT'} for em-relative"),
-  lineHeight: LineHeight.optional().describe("number = PIXELS; {value,unit:'PERCENT'} or {unit:'AUTO'}"),
-  textCase: z.enum(["ORIGINAL", "UPPER", "LOWER", "TITLE"]).optional(),
-  textDecoration: z.enum(["NONE", "UNDERLINE", "STRIKETHROUGH"]).optional()
-};
-var childrenField = {
-  children: z.array(z.lazy(() => writeNodeUnion)).optional().describe("nested specs, created recursively inside this node")
+var parentId = z3.string().optional().describe("container to append into; default current page. short ids (n0) or full ids");
+var index = z3.number().int().min(0).optional().describe("position among siblings");
+var width = z3.number().positive().optional().describe("routed through resize()");
+var height = z3.number().positive().optional().describe("routed through resize()");
+var componentId = z3.string().optional().describe("local COMPONENT id (from get_local_components)");
+var componentKey = z3.string().optional().describe("published library component key");
+var children = z3.array(z3.lazy(() => writeNodeUnion)).optional().describe("nested specs, created recursively inside this node");
+var CONTAINER_TYPES = /* @__PURE__ */ new Set(["FRAME", "COMPONENT", "SECTION", "INSTANCE"]);
+var REQUIRED = { TEXT: /* @__PURE__ */ new Set(["characters"]) };
+var FIELD_OVERRIDES = {
+  opacity: z3.number().min(0).max(1),
+  cornerRadius: z3.number().min(0),
+  strokeWeight: z3.number().min(0)
 };
 var READ_ONLY_KEYS = {
   style: "REST read-format; on write use fontName {family,style} + fontSize on a TEXT node",
@@ -472,41 +1034,42 @@ var READ_ONLY_KEYS = {
   boundVariables: "variable bindings not supported on write; set a literal value",
   id: "assigned by Figma"
 };
+function compose(type) {
+  const gen = GENERATED_FIELDS[type] ?? {};
+  const required = REQUIRED[type] ?? /* @__PURE__ */ new Set();
+  const shape = { type: z3.literal(type) };
+  for (const [key, generated] of Object.entries(gen)) {
+    const base = FIELD_OVERRIDES[key] ?? generated;
+    let field = required.has(key) ? base : base.optional();
+    if (NOTES[key]) field = field.describe(NOTES[key]);
+    shape[key] = field;
+  }
+  shape.parentId = parentId;
+  shape.index = index;
+  shape.width = width;
+  shape.height = height;
+  if (CONTAINER_TYPES.has(type)) shape.children = children;
+  if (type === "INSTANCE") {
+    shape.componentId = componentId;
+    shape.componentKey = componentKey;
+  }
+  return z3.object(shape).passthrough();
+}
+var NODE_SCHEMAS = Object.fromEntries(
+  NODE_TYPES.map((t) => [t, compose(t)])
+);
 function rejectReadOnly(spec, ctx) {
   for (const key of Object.keys(spec)) {
     if (key in READ_ONLY_KEYS) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: READ_ONLY_KEYS[key], path: [key] });
+      ctx.addIssue({ code: z3.ZodIssueCode.custom, message: READ_ONLY_KEYS[key], path: [key] });
     }
   }
 }
-var containerExtras = { ...sizeFields, ...paintFields, ...cornerFields, ...autoLayoutFields, ...childrenField };
-var shapeExtras = { ...sizeFields, ...paintFields };
-var NODE_SCHEMAS = {
-  FRAME: z.object({ type: z.literal("FRAME"), ...baseFields, ...containerExtras }).passthrough(),
-  COMPONENT: z.object({ type: z.literal("COMPONENT"), ...baseFields, ...containerExtras }).passthrough(),
-  SECTION: z.object({ type: z.literal("SECTION"), ...baseFields, ...sizeFields, ...paintFields, ...childrenField }).passthrough(),
-  TEXT: z.object({ type: z.literal("TEXT"), ...baseFields, ...sizeFields, fills: paintFields.fills, ...textFields }).passthrough(),
-  RECTANGLE: z.object({ type: z.literal("RECTANGLE"), ...baseFields, ...shapeExtras, ...cornerFields }).passthrough(),
-  ELLIPSE: z.object({ type: z.literal("ELLIPSE"), ...baseFields, ...shapeExtras }).passthrough(),
-  POLYGON: z.object({ type: z.literal("POLYGON"), ...baseFields, ...shapeExtras }).passthrough(),
-  STAR: z.object({ type: z.literal("STAR"), ...baseFields, ...shapeExtras }).passthrough(),
-  LINE: z.object({ type: z.literal("LINE"), ...baseFields, ...paintFields }).passthrough(),
-  VECTOR: z.object({ type: z.literal("VECTOR"), ...baseFields, ...shapeExtras }).passthrough(),
-  SLICE: z.object({ type: z.literal("SLICE"), ...baseFields, ...sizeFields }).passthrough(),
-  INSTANCE: z.object({
-    type: z.literal("INSTANCE"),
-    componentId: z.string().optional().describe("local COMPONENT id (from get_local_components)"),
-    componentKey: z.string().optional().describe("published library component key"),
-    ...baseFields,
-    ...sizeFields,
-    ...childrenField
-  }).passthrough()
-};
-var writeNodeUnion = z.lazy(
-  () => z.discriminatedUnion("type", Object.values(NODE_SCHEMAS)).superRefine((spec, ctx) => {
+var writeNodeUnion = z3.lazy(
+  () => z3.discriminatedUnion("type", NODE_TYPES.map((t) => NODE_SCHEMAS[t])).superRefine((spec, ctx) => {
     rejectReadOnly(spec, ctx);
     if (spec.type === "INSTANCE" && !spec.componentId && !spec.componentKey) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "INSTANCE needs componentId (local) or componentKey (published)", path: ["componentId"] });
+      ctx.addIssue({ code: z3.ZodIssueCode.custom, message: "INSTANCE needs componentId (local) or componentKey (published)", path: ["componentId"] });
     }
   })
 );
@@ -538,6 +1101,8 @@ function renderType(schema) {
       return JSON.stringify(def.value);
     case "ZodArray":
       return `${renderType(def.type)}[]`;
+    case "ZodRecord":
+      return "object";
     case "ZodObject": {
       const keys = Object.keys(def.shape());
       return `{${keys.join(",")}}`;
@@ -582,14 +1147,14 @@ function describeNodeSchema(type) {
 function listNodeTypes() {
   return "Node types (get_write_schema(type) for fields):\n  " + NODE_TYPES.join(", ");
 }
-var FIELD_SCHEMAS = {
-  ...baseFields,
-  ...sizeFields,
-  ...paintFields,
-  ...cornerFields,
-  ...autoLayoutFields,
-  ...textFields
-};
+var FIELD_SCHEMAS = {};
+for (const type of NODE_TYPES) {
+  for (const [key, schema] of Object.entries(GENERATED_FIELDS[type] ?? {})) {
+    if (!(key in FIELD_SCHEMAS)) FIELD_SCHEMAS[key] = FIELD_OVERRIDES[key] ?? schema;
+  }
+}
+FIELD_SCHEMAS.width = z3.number().positive();
+FIELD_SCHEMAS.height = z3.number().positive();
 function validateEditValue(path, value) {
   const segs = path.replace(/\[(\d+)\]/g, ".$1").split(".").filter(Boolean);
   if (!segs.length) return null;
@@ -599,7 +1164,7 @@ function validateEditValue(path, value) {
   if (!leaf) return null;
   let schema;
   if (leaf === "color") schema = Color;
-  else if (leaf === "fills" || leaf === "strokes") schema = endsWithIndex ? Paint : z.array(Paint);
+  else if (leaf === "fills" || leaf === "strokes") schema = endsWithIndex ? Paint : z3.array(Paint);
   else schema = FIELD_SCHEMAS[leaf] ?? null;
   if (!schema) return null;
   const r = schema.safeParse(value);
@@ -632,10 +1197,10 @@ var serverArg = args.find((arg) => arg.startsWith("--server="));
 var serverUrl = serverArg ? serverArg.split("=")[1] : "localhost";
 var WS_URL = serverUrl === "localhost" ? `ws://${serverUrl}` : `wss://${serverUrl}`;
 var saveParams = {
-  saveToFile: z2.boolean().optional().describe(
+  saveToFile: z4.boolean().optional().describe(
     "If true, write the full result to a file and return only its path + byte size instead of the payload. Use for large outputs to keep them out of the LLM context."
   ),
-  outputPath: z2.string().optional().describe(
+  outputPath: z4.string().optional().describe(
     "Explicit file path to write the result to (implies saveToFile). Parent dirs are created. Defaults to an auto-named file under the OS temp dir."
   )
 };
@@ -708,10 +1273,10 @@ server.tool(
   }
 );
 var shapeParams = {
-  depth: z2.number().int().min(0).optional().describe("Levels of children below the requested node to expand (default 6). Deeper nodes become stubs with {childCount, more:true}; re-request that id to zoom in. Raise to see more at once, lower for a terser overview."),
-  collapseIcons: z2.boolean().optional().describe("Collapse icon-like subtrees (no text, vector leaves) to a single ICON node with more:true (default true)."),
-  collapseRepeats: z2.boolean().optional().describe("Collapse repeated instances of the same component: the first renders in full, later copies become a stub with their props/text and more:true (default true)."),
-  cull: z2.boolean().optional().describe("Drop nodes that render nowhere \u2014 fully clipped out by an ancestor's clipsContent ({id, clipped:true}) or fully covered by an opaque sibling above ({id, occluded:true}). Default true.")
+  depth: z4.number().int().min(0).optional().describe("Levels of children below the requested node to expand (default 6). Deeper nodes become stubs with {childCount, more:true}; re-request that id to zoom in. Raise to see more at once, lower for a terser overview."),
+  collapseIcons: z4.boolean().optional().describe("Collapse icon-like subtrees (no text, vector leaves) to a single ICON node with more:true (default true)."),
+  collapseRepeats: z4.boolean().optional().describe("Collapse repeated instances of the same component: the first renders in full, later copies become a stub with their props/text and more:true (default true)."),
+  cull: z4.boolean().optional().describe("Drop nodes that render nowhere \u2014 fully clipped out by an ancestor's clipsContent ({id, clipped:true}) or fully covered by an opaque sibling above ({id, occluded:true}). Default true.")
 };
 var NAME_MAX = 40;
 function truncName(name) {
@@ -725,8 +1290,8 @@ server.tool(
   "read_node",
   "Read Figma nodes \u2014 the Read tool for the canvas. Pass `nodeIds` (one or many); omit it to read the current selection. Returns one entry per node. Default (compact) gives each node's subtree in a minimal, low-token field set (id, name, type, color/gradient, opacity, box or autoLayout, text); children expand to `depth` levels and deeper nodes become {childCount, more:true} stubs \u2014 re-request a stub's id or raise depth to zoom in. Each requested node also carries `ancestors`: a root-first breadcrumb (page \u2192 ... \u2192 immediate parent) of `id:\"name\".TYPE` tokens (same form as glob lines) so you know what contains it without a separate glob \u2014 those ids are short counters too, so pass one back to zoom OUT. Set `raw:true` for the full, unfiltered JSON_REST_V1 of each node with ALL properties but the children array stripped (use when the compact view drops a field you need); in raw mode depth/collapse/cull are ignored \u2014 raw is always one node, all props, no children. Large outputs auto-spill to a file. Node ids are short counters (n0, n1, ...) standing in for canonical Figma ids \u2014 pass them to any tool. Locate ids with glob_nodes/grep_nodes first, then read_node to inspect properties.",
   {
-    nodeIds: z2.array(z2.string()).optional().describe("Node ids to read (short n0,... or canonical). Omit to read the current selection."),
-    raw: z2.boolean().optional().describe("Return each node's full unfiltered props (children stripped) instead of the compact subtree. Ignores depth/collapse/cull. Default false."),
+    nodeIds: z4.array(z4.string()).optional().describe("Node ids to read (short n0,... or canonical). Omit to read the current selection."),
+    raw: z4.boolean().optional().describe("Return each node's full unfiltered props (children stripped) instead of the compact subtree. Ignores depth/collapse/cull. Default false."),
     ...shapeParams,
     ...saveParams
   },
@@ -782,16 +1347,16 @@ server.tool(
   "glob_nodes",
   'List nodes under a root by type and/or name glob, one per line as `id:"name".TYPE @parent [x,y wxh]` \u2014 a flat, grep-friendly index of a subtree (the Figma analog of glob / `ls -R`). The `@parent` is the immediate container\'s short id (location without drawing the tree; pass it to read_node to see surroundings). The trailing `[x,y wxh]` is the node\'s ABSOLUTE bounding box (omitted with `bbox:false`, or when a node has no geometry). Filters: `type` (a node type, an array, or "*"/omit for any); `name` (a shell-style glob over the node\'s OWN name: `*` = any run, `?` = one char; omit for any \u2014 matches names only, not paths, since Figma names contain slashes); and `within` (an absolute rect \u2014 keep only nodes intersecting it, e.g. to glob a region; get its coords from a prior bbox). `root` is the node id to search under (default: current page); descends through every container regardless of match (any-depth search), with `depth` capping how deep. Ids (including `@parent`) are short counters (n0, n1, ...) \u2014 feed any straight into read/edit tools.',
   {
-    root: z2.string().optional().describe("Node id to search under. Defaults to the current page. Accepts short ids (n0, ...)."),
-    name: z2.string().optional().describe("Shell-style glob matched against each node's own name (* = any run, ? = one char). Case-insensitive. Omit to match any name."),
-    type: z2.union([z2.string(), z2.array(z2.string())]).optional().describe('Node type filter: a single type (e.g. "TEXT"), an array (["TEXT","INSTANCE"]), or "*"/omit for any. Case-insensitive.'),
-    depth: z2.number().optional().describe("Max depth below root to descend (root's direct children = 1). Omit for unlimited."),
-    bbox: z2.boolean().optional().describe("Append each hit's absolute bounding box as [x,y wxh]. Default true; pass false to drop it and save tokens."),
-    within: z2.object({
-      x: z2.number(),
-      y: z2.number(),
-      width: z2.number(),
-      height: z2.number()
+    root: z4.string().optional().describe("Node id to search under. Defaults to the current page. Accepts short ids (n0, ...)."),
+    name: z4.string().optional().describe("Shell-style glob matched against each node's own name (* = any run, ? = one char). Case-insensitive. Omit to match any name."),
+    type: z4.union([z4.string(), z4.array(z4.string())]).optional().describe('Node type filter: a single type (e.g. "TEXT"), an array (["TEXT","INSTANCE"]), or "*"/omit for any. Case-insensitive.'),
+    depth: z4.number().optional().describe("Max depth below root to descend (root's direct children = 1). Omit for unlimited."),
+    bbox: z4.boolean().optional().describe("Append each hit's absolute bounding box as [x,y wxh]. Default true; pass false to drop it and save tokens."),
+    within: z4.object({
+      x: z4.number(),
+      y: z4.number(),
+      width: z4.number(),
+      height: z4.number()
     }).optional().describe("Absolute rectangle; keep only nodes whose bounding box intersects it. Coordinates are absolute (same space as the [x,y wxh] output). Use to glob a visual region."),
     ...saveParams
   },
@@ -824,20 +1389,20 @@ server.tool(
   "grep_nodes",
   'Search the TEXT content of a subtree by regex \u2014 the Figma analog of grep. Tests each TEXT node\'s `characters` LINE BY LINE (Figma text is multi-line) and returns hits one per line as `id:"name".TEXT @parent L<n>: <line>`, where `L<n>` is the 1-based line within that text node and `<line>` is the matching line (long lines are windowed around the match; pass `onlyMatch:true` for just the matched substrings, like grep -o). This searches CONTENT, not names \u2014 to match node names use glob_nodes\' `name` glob instead. `pattern` is a JS regex (not a shell glob); `ignoreCase` adds the `i` flag. Scope with `root` (node id to search under, default current page), `depth` (cap descent), and `within` (an absolute rect \u2014 only nodes intersecting it; get coords from a prior bbox). `mode` shapes output: "content" (default, every matching line), "nodes" (one line per matching node with its hit count, like grep -l), or "count" (just totals). Ids (and `@parent`) are short counters (n0, n1, ...) \u2014 feed any straight into read/edit tools. Results cap at `maxMatches` line-hits (default 1000); a `(truncated)` note is appended if hit.',
   {
-    pattern: z2.string().describe('JavaScript regular expression source (NOT a shell glob). E.g. "\\\\bCTA\\\\b", "\\\\$\\\\d+", "left$".'),
-    root: z2.string().optional().describe("Node id to search under. Defaults to the current page. Accepts short ids (n0, ...)."),
-    ignoreCase: z2.boolean().optional().describe("Case-insensitive match (regex `i` flag). Default false."),
-    onlyMatch: z2.boolean().optional().describe("Report only the matched substring(s) per line instead of the whole line (grep -o). Default false."),
-    mode: z2.enum(["content", "nodes", "count"]).optional().describe('Output shape: "content" (default; each matching line), "nodes" (one line per matching node + its hit count), or "count" (totals only).'),
-    depth: z2.number().optional().describe("Max depth below root to descend (root's direct children = 1). Omit for unlimited."),
-    within: z2.object({
-      x: z2.number(),
-      y: z2.number(),
-      width: z2.number(),
-      height: z2.number()
+    pattern: z4.string().describe('JavaScript regular expression source (NOT a shell glob). E.g. "\\\\bCTA\\\\b", "\\\\$\\\\d+", "left$".'),
+    root: z4.string().optional().describe("Node id to search under. Defaults to the current page. Accepts short ids (n0, ...)."),
+    ignoreCase: z4.boolean().optional().describe("Case-insensitive match (regex `i` flag). Default false."),
+    onlyMatch: z4.boolean().optional().describe("Report only the matched substring(s) per line instead of the whole line (grep -o). Default false."),
+    mode: z4.enum(["content", "nodes", "count"]).optional().describe('Output shape: "content" (default; each matching line), "nodes" (one line per matching node + its hit count), or "count" (totals only).'),
+    depth: z4.number().optional().describe("Max depth below root to descend (root's direct children = 1). Omit for unlimited."),
+    within: z4.object({
+      x: z4.number(),
+      y: z4.number(),
+      width: z4.number(),
+      height: z4.number()
     }).optional().describe("Absolute rectangle; keep only TEXT nodes whose bounding box intersects it. Same coordinate space as glob_nodes' [x,y wxh]."),
-    bbox: z2.boolean().optional().describe("Append each hit node's absolute bounding box as [x,y wxh]. Default false."),
-    maxMatches: z2.number().optional().describe("Hard cap on collected line-hits before the walk stops. Default 1000."),
+    bbox: z4.boolean().optional().describe("Append each hit node's absolute bounding box as [x,y wxh]. Default false."),
+    maxMatches: z4.number().optional().describe("Hard cap on collected line-hits before the walk stops. Default 1000."),
     ...saveParams
   },
   async ({ pattern, root, ignoreCase, onlyMatch, mode, depth, within, bbox, maxMatches, saveToFile, outputPath }) => {
@@ -899,24 +1464,24 @@ server.tool(
   "query_nodes",
   'Find nodes by predicates on their STRUCTURE \u2014 query the node model\'s fields, not flat text. Pass `where`: an array of `{path, op, value}` predicates that are AND-combined; a node is a hit when all pass. Returned one per line as `id:"name".TYPE @parent {path=value, ...}`. `path` walks the node JSON: dot for objects, `[i]` for an array index, `[*]` for "any array element" (e.g. `fills[*].color`, `boundVariables.fills`, `fontSize`, `name`, `type`). Ops \u2014 `regex` (DEFAULT; case-insensitive with `i:true`; covers equality/contains/oneOf via the pattern; this is the right op for strings, ids, enums, even numbers as text); `gt`/`gte`/`lt`/`lte` (numeric compare \u2014 what regex can\'t do, e.g. fontSize<12, opacity<1); `color` (value is `#RRGGBB`; matches a Figma rgb 0-1 color with tolerance); `exists`/`absent` (presence of the KEY itself, no value \u2014 `absent` finds nodes MISSING a field, e.g. `boundVariables.fills` absent = a fill NOT bound to a variable/token; the core design-system audit query). Scope with `root` (default current page), `depth`, `within` (absolute rect). `bbox:true` appends each hit\'s [x,y wxh]. Ids (and `@parent`) are short counters \u2014 feed straight into other tools. Caps at `maxMatches` hits (default 1000). For raw authored copy use grep_nodes; for a plain type/name index use glob_nodes.',
   {
-    where: z2.array(
-      z2.object({
-        path: z2.string().describe('Field path on the node. Dot for objects, [i] for an index, [*] for any array element. E.g. "fontSize", "fills[*].color", "boundVariables.fills", "name".'),
-        op: z2.enum(["regex", "gt", "gte", "lt", "lte", "color", "exists", "absent"]).optional().describe('Match op. Default "regex". Use gt/gte/lt/lte for numbers, color for #RRGGBB, exists/absent for key presence (no value needed).'),
-        value: z2.union([z2.string(), z2.number(), z2.boolean()]).optional().describe('Comparison value. Regex source for "regex", a number for compares, "#RRGGBB" for color. Omit for exists/absent.'),
-        i: z2.boolean().optional().describe('Case-insensitive regex (only for op "regex"). Default false.')
+    where: z4.array(
+      z4.object({
+        path: z4.string().describe('Field path on the node. Dot for objects, [i] for an index, [*] for any array element. E.g. "fontSize", "fills[*].color", "boundVariables.fills", "name".'),
+        op: z4.enum(["regex", "gt", "gte", "lt", "lte", "color", "exists", "absent"]).optional().describe('Match op. Default "regex". Use gt/gte/lt/lte for numbers, color for #RRGGBB, exists/absent for key presence (no value needed).'),
+        value: z4.union([z4.string(), z4.number(), z4.boolean()]).optional().describe('Comparison value. Regex source for "regex", a number for compares, "#RRGGBB" for color. Omit for exists/absent.'),
+        i: z4.boolean().optional().describe('Case-insensitive regex (only for op "regex"). Default false.')
       })
     ).min(1).describe("Predicates, AND-combined. At least one required."),
-    root: z2.string().optional().describe("Node id to search under. Defaults to the current page. Accepts short ids (n0, ...)."),
-    depth: z2.number().optional().describe("Max depth below root to descend (root's direct children = 1). Omit for unlimited."),
-    within: z2.object({
-      x: z2.number(),
-      y: z2.number(),
-      width: z2.number(),
-      height: z2.number()
+    root: z4.string().optional().describe("Node id to search under. Defaults to the current page. Accepts short ids (n0, ...)."),
+    depth: z4.number().optional().describe("Max depth below root to descend (root's direct children = 1). Omit for unlimited."),
+    within: z4.object({
+      x: z4.number(),
+      y: z4.number(),
+      width: z4.number(),
+      height: z4.number()
     }).optional().describe("Absolute rectangle; keep only nodes whose bounding box intersects it. Same coordinate space as glob_nodes' [x,y wxh]."),
-    bbox: z2.boolean().optional().describe("Append each hit's absolute bounding box as [x,y wxh]. Default false."),
-    maxMatches: z2.number().optional().describe("Hard cap on collected hits before the walk stops. Default 1000."),
+    bbox: z4.boolean().optional().describe("Append each hit's absolute bounding box as [x,y wxh]. Default false."),
+    maxMatches: z4.number().optional().describe("Hard cap on collected hits before the walk stops. Default 1000."),
     ...saveParams
   },
   async ({ where, root, depth, within, bbox, maxMatches, saveToFile, outputPath }) => {
@@ -956,12 +1521,12 @@ server.tool(
   "edit_nodes",
   "Edit node properties directly in the node model \u2014 the write-side twin of query_nodes/read_node, an Edit tool for Figma JSON instead of text. Pass `edits`: an array of `{nodeId, path, old?, new}`. `path` addresses one field the same way query_nodes does \u2014 dot for objects, `[i]` for an array index (e.g. `name`, `cornerRadius`, `fills[0].color`, `fills[0].opacity`); no `[*]` (a write needs one concrete target). `new` is the value to set: colors as `#RRGGBB` are converted to Figma's rgb 0-1, and whole objects/arrays are allowed (e.g. set `fills[0]` to a full paint). `old` is an OPTIONAL guard, exactly like the old_string in Edit \u2014 if given and it doesn't match the current value (colors compared as hex, numbers tolerantly), that one edit is rejected so you never blind-overwrite a stale read. Edits run in order and are INDEPENDENT: one failing \u2014 guard mismatch, read-only/derived prop, a type Figma rejects, font not loaded \u2014 records its Figma error and the rest still apply. The result lists each edit as `\u2713 id path: old \u2192 new` or `\u2717 id path: <error>`, so a failure tells you exactly what to fix. One call can touch many nodes (each edit names its own `nodeId`) \u2014 this is also how you bulk-replace text across components: one `{nodeId, path:\"characters\", new:\"...\"}` per text node in a single call (the `characters` path loads the node's font for you). Large batches stream progress, so a long run won't time out. Common paths: `name`, `characters`, `x`/`y`, `width`/`height` (resize), `cornerRadius`, `fills[0].color` (#RRGGBB), `opacity`, `layoutMode`, `paddingTop`, `itemSpacing`, `primaryAxisAlignItems`, `layoutSizingHorizontal`. nodeId accepts short ids (n0, ...) or full Figma ids.",
   {
-    edits: z2.array(
-      z2.object({
-        nodeId: z2.string().describe("Node to edit. Short ids (n0, ...) or full Figma ids."),
-        path: z2.string().describe('Field path to write. Dot for objects, [i] for an array index. Same syntax as query_nodes, but no [*]. E.g. "name", "cornerRadius", "fills[0].color".'),
-        old: z2.any().optional().describe("Optional guard: expected current value (Edit-style). Colors as #RRGGBB. Mismatch rejects only this edit."),
-        new: z2.any().describe("Value to set. #RRGGBB \u2192 Figma rgb; numbers/strings/objects/arrays allowed.")
+    edits: z4.array(
+      z4.object({
+        nodeId: z4.string().describe("Node to edit. Short ids (n0, ...) or full Figma ids."),
+        path: z4.string().describe('Field path to write. Dot for objects, [i] for an array index. Same syntax as query_nodes, but no [*]. E.g. "name", "cornerRadius", "fills[0].color".'),
+        old: z4.any().optional().describe("Optional guard: expected current value (Edit-style). Colors as #RRGGBB. Mismatch rejects only this edit."),
+        new: z4.any().describe("Value to set. #RRGGBB \u2192 Figma rgb; numbers/strings/objects/arrays allowed.")
       })
     ).min(1).describe("Edits applied in order; each independent \u2014 one failing does not abort the rest.")
   },
@@ -1001,7 +1566,7 @@ server.tool(
   "write_nodes",
   'Create new nodes from raw Figma JSON \u2014 the create-side twin of edit_nodes, a Write tool for the node tree instead of text. Pass `nodes`: an array of node specs. Each spec is `{type, ...props, children?}`: `type` is the Figma node type to create (RECTANGLE, FRAME, TEXT, ELLIPSE, LINE, STAR, POLYGON, VECTOR, COMPONENT, SECTION, SLICE, or INSTANCE). Every OTHER key is a property written onto the new node exactly as edit_nodes writes a path \u2014 `name`, `x`, `y`, `cornerRadius`, `opacity`, `fills`, `layoutMode`, `paddingTop`, `itemSpacing`, etc. Values follow edit_nodes rules: any `color` field given as `#RRGGBB` is converted to Figma\'s rgb 0-1 (so `fills:[{type:"SOLID",color:"#3366ff"}]` works), `width`/`height` route through resize(), and on a TEXT node `characters` loads the node\'s font for you. Placement: `parentId` appends the node into an existing container (short ids n0,... or full Figma ids; default is the current page) and `index` sets its position among siblings. `children` is an array of the same spec shape, created recursively inside this node \u2014 this is how you write a whole subtree (frame \u2192 its rows \u2192 their text) in one call. Specs are INDEPENDENT like edit_nodes: a spec whose factory or parent lookup fails records its Figma error and the siblings still create; within a created node, a single bad property (e.g. padding with no layoutMode, a value Figma rejects) is reported per-property and the node still survives with its other props. INSTANCE needs `componentId` (a local COMPONENT, from get_local_components) or `componentKey` (a published library component). The result is a tree of `\u2713 <id> <TYPE> "<name>"` (use that id as a parentId or in edit_nodes next) or `\u2717 <error>`, with `! key: <error>` lines for any rejected properties. Large batches stream progress so a long run won\'t time out.',
   {
-    nodes: z2.array(z2.record(z2.any())).min(1).describe("Node specs, each `{type, ...props, children?}`. Created in order, independent \u2014 one failing does not abort the rest.")
+    nodes: z4.array(z4.record(z4.any())).min(1).describe("Node specs, each `{type, ...props, children?}`. Created in order, independent \u2014 one failing does not abort the rest.")
   },
   async ({ nodes }) => {
     try {
@@ -1050,7 +1615,7 @@ server.tool(
   "get_write_schema",
   'Get the WRITE-side schema for a node type \u2014 the fields write_nodes accepts when CREATING that type (not the REST shape read_node returns). Call with `type` (e.g. "TEXT") right before building a node to see its fields, valid enum values, and ranges; call with no `type` to list the creatable types. This is the same schema write_nodes validates against, so what it shows is exactly what is accepted. Note: write_nodes also passes through any other Figma property for the type, so the list is the curated common set, not an exhaustive cap.',
   {
-    type: z2.enum(NODE_TYPES).optional().describe("Node type to describe (FRAME, TEXT, ...). Omit to list all creatable types.")
+    type: z4.enum(NODE_TYPES).optional().describe("Node type to describe (FRAME, TEXT, ...). Omit to list all creatable types.")
   },
   async ({ type }) => {
     const text = type ? describeNodeSchema(type) : listNodeTypes();
@@ -1061,9 +1626,9 @@ server.tool(
   "clone_node",
   "Clone an existing node in Figma",
   {
-    nodeId: z2.string().describe("The ID of the node to clone"),
-    x: z2.number().optional().describe("New X position for the clone"),
-    y: z2.number().optional().describe("New Y position for the clone")
+    nodeId: z4.string().describe("The ID of the node to clone"),
+    x: z4.number().optional().describe("New X position for the clone"),
+    y: z4.number().optional().describe("New Y position for the clone")
   },
   async ({ nodeId, x, y }) => {
     try {
@@ -1093,7 +1658,7 @@ server.tool(
   "delete_nodes",
   "Delete one or more nodes from Figma. Large batches are chunked with progress updates.",
   {
-    nodeIds: z2.array(z2.string()).describe("Array of node IDs to delete")
+    nodeIds: z4.array(z4.string()).describe("Array of node IDs to delete")
   },
   async ({ nodeIds }) => {
     try {
@@ -1122,19 +1687,19 @@ server.tool(
   "export_node_as_image",
   "Export one or more nodes as images from Figma. Each node may request several scales at once, so a single call can produce many files. To actually look at how a node renders, pass inline:true with a small scale (e.g. 0.5) so the image comes back in the response and stays cheap on context.",
   {
-    nodes: z2.array(
-      z2.object({
-        nodeId: z2.string().describe("The ID of the node to export"),
-        scale: z2.union([z2.number().positive(), z2.array(z2.number().positive()).nonempty()]).optional().describe(
+    nodes: z4.array(
+      z4.object({
+        nodeId: z4.string().describe("The ID of the node to export"),
+        scale: z4.union([z4.number().positive(), z4.array(z4.number().positive()).nonempty()]).optional().describe(
           "Export scale(s): a single number, or an array to emit one image per scale. Only applies to raster formats (PNG/JPG); ignored for SVG/PDF. Default 1."
         )
       })
     ).nonempty().describe("Nodes to export. Each entry exports its node at its own scale(s)."),
-    format: z2.enum(["PNG", "JPG", "SVG", "PDF"]).optional().describe("Export format shared by all nodes (default PNG)."),
-    inline: z2.boolean().optional().describe(
+    format: z4.enum(["PNG", "JPG", "SVG", "PDF"]).optional().describe("Export format shared by all nodes (default PNG)."),
+    inline: z4.boolean().optional().describe(
       `Return the image(s) directly in the response instead of writing files, so you can see them. Set this whenever you want to look at how something renders \u2014 and pair it with a small scale (e.g. 0.5) to keep it cheap. Honored only for raster formats (PNG/JPG) whose encoded size is under ${INLINE_MAX_BYTES / 1024}KB \u2014 anything larger (or SVG/PDF) falls back to a file to avoid blowing up the context.`
     ),
-    outputDir: z2.string().optional().describe(
+    outputDir: z4.string().optional().describe(
       "Directory to write the images into (created if missing). Defaults to the OS temp dir. Files are auto-named export-<nodeId>@<scale>x.<ext>. Ignored for images returned inline."
     )
   },
@@ -1230,8 +1795,8 @@ server.tool(
   "get_annotations",
   "Get all annotations in the current document or specific node",
   {
-    nodeId: z2.string().describe("node ID to get annotations for specific node"),
-    includeCategories: z2.boolean().optional().default(true).describe("Whether to include category information"),
+    nodeId: z4.string().describe("node ID to get annotations for specific node"),
+    includeCategories: z4.boolean().optional().default(true).describe("Whether to include category information"),
     ...saveParams
   },
   async ({ nodeId, includeCategories, saveToFile, outputPath }) => {
@@ -1259,14 +1824,14 @@ server.tool(
   "set_annotations",
   "Create or update one or more native Figma annotations. Pass `annotations`: an array of `{nodeId, labelMarkdown, categoryId?, annotationId?, properties?}`. Each entry annotates its own `nodeId` with markdown text; supply `annotationId` to update an existing annotation instead of creating one, and `categoryId` to file it under an annotation category (from get_annotations). Entries are applied independently \u2014 one failing records its error and the rest still apply. Large batches are chunked with progress updates so a long run won't time out. The result lists each entry as `\u2713 <id>` or `\u2717 <id>: <error>`.",
   {
-    annotations: z2.array(
-      z2.object({
-        nodeId: z2.string().describe("The ID of the node to annotate"),
-        labelMarkdown: z2.string().describe("The annotation text in markdown format"),
-        categoryId: z2.string().optional().describe("The ID of the annotation category"),
-        annotationId: z2.string().optional().describe("The ID of the annotation to update (if updating existing annotation)"),
-        properties: z2.array(z2.object({
-          type: z2.string()
+    annotations: z4.array(
+      z4.object({
+        nodeId: z4.string().describe("The ID of the node to annotate"),
+        labelMarkdown: z4.string().describe("The annotation text in markdown format"),
+        categoryId: z4.string().optional().describe("The ID of the annotation category"),
+        annotationId: z4.string().optional().describe("The ID of the annotation to update (if updating existing annotation)"),
+        properties: z4.array(z4.object({
+          type: z4.string()
         })).optional().describe("Additional properties for the annotation")
       })
     ).min(1).describe("Annotations to apply; each independent \u2014 one failing does not abort the rest.")
@@ -1296,7 +1861,7 @@ server.tool(
   "get_instance_overrides",
   "Get all override properties from a selected component instance. These overrides can be applied to other instances, which will swap them to match the source component.",
   {
-    nodeId: z2.string().optional().describe("Optional ID of the component instance to get overrides from. If not provided, currently selected instance will be used.")
+    nodeId: z4.string().optional().describe("Optional ID of the component instance to get overrides from. If not provided, currently selected instance will be used.")
   },
   async ({ nodeId }) => {
     try {
@@ -1328,8 +1893,8 @@ server.tool(
   "set_instance_overrides",
   "Apply previously copied overrides to selected component instances. Target instances will be swapped to the source component and all copied override properties will be applied.",
   {
-    sourceInstanceId: z2.string().describe("ID of the source component instance"),
-    targetNodeIds: z2.array(z2.string()).describe("Array of target instance IDs. Currently selected instances will be used.")
+    sourceInstanceId: z4.string().describe("ID of the source component instance"),
+    targetNodeIds: z4.array(z4.string()).describe("Array of target instance IDs. Currently selected instances will be used.")
   },
   async ({ sourceInstanceId, targetNodeIds }) => {
     try {
@@ -1737,7 +2302,7 @@ server.tool(
   "get_reactions",
   "Get Figma Prototyping Reactions from multiple nodes. CRITICAL: The output MUST be processed using the 'reaction_to_connector_strategy' prompt IMMEDIATELY to generate parameters for connector lines via the 'create_connections' tool.",
   {
-    nodeIds: z2.array(z2.string()).describe("Array of node IDs to get reactions from"),
+    nodeIds: z4.array(z4.string()).describe("Array of node IDs to get reactions from"),
     ...saveParams
   },
   async ({ nodeIds, saveToFile, outputPath }) => {
@@ -1772,7 +2337,7 @@ server.tool(
   "set_default_connector",
   "Set a copied connector node as the default connector",
   {
-    connectorId: z2.string().optional().describe("The ID of the connector node to set as default")
+    connectorId: z4.string().optional().describe("The ID of the connector node to set as default")
   },
   async ({ connectorId }) => {
     try {
@@ -1803,10 +2368,10 @@ server.tool(
   "create_connections",
   "Create connections between nodes using the default connector style",
   {
-    connections: z2.array(z2.object({
-      startNodeId: z2.string().describe("ID of the starting node"),
-      endNodeId: z2.string().describe("ID of the ending node"),
-      text: z2.string().optional().describe("Optional text to display on the connector")
+    connections: z4.array(z4.object({
+      startNodeId: z4.string().describe("ID of the starting node"),
+      endNodeId: z4.string().describe("ID of the ending node"),
+      text: z4.string().optional().describe("Optional text to display on the connector")
     })).describe("Array of node connections to create")
   },
   async ({ connections }) => {
@@ -1848,7 +2413,7 @@ server.tool(
   "set_focus",
   "Set focus on a specific node in Figma by selecting it and scrolling viewport to it",
   {
-    nodeId: z2.string().describe("The ID of the node to focus on")
+    nodeId: z4.string().describe("The ID of the node to focus on")
   },
   async ({ nodeId }) => {
     try {
@@ -1878,7 +2443,7 @@ server.tool(
   "set_selections",
   "Set selection to multiple nodes in Figma and scroll viewport to show them",
   {
-    nodeIds: z2.array(z2.string()).describe("Array of node IDs to select")
+    nodeIds: z4.array(z4.string()).describe("Array of node IDs to select")
   },
   async ({ nodeIds }) => {
     try {
@@ -2175,7 +2740,7 @@ server.tool(
   "join_channel",
   "Join a specific channel to communicate with Figma. Leave channel empty to auto-join the channel the plugin currently has open (when exactly one is active).",
   {
-    channel: z2.string().describe("The name of the channel to join").default("")
+    channel: z4.string().describe("The name of the channel to join").default("")
   },
   async ({ channel }) => {
     try {

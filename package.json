@@ -20,14 +20,17 @@
     "socket": "bun run src/socket.ts",
     "setup": "./scripts/setup.sh",
     "build": "tsup",
+    "gen:schema": "bun run scripts/gen-write-schema.ts",
     "build:watch": "tsup --watch",
     "dev": "bun run build:watch",
     "prepublishOnly": "bun run build",
     "pub:release": "npm publish"
   },
   "devDependencies": {
+    "@figma/plugin-typings": "^1.128.0",
     "@types/bun": "latest",
     "bun-types": "^1.2.5",
+    "ts-morph": "^28.0.0",
     "tsup": "^8.4.0",
     "typescript": "^5.0.0"
   },
