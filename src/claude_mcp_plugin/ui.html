@@ -508,6 +508,7 @@
         serverPort: 3055,
         pendingRequests: new Map(),
         channel: null,
+        fileInfo: null, // {name, page, editorType} from the plugin code thread
         compact: false,
         pinned: false, // once auto-collapsed, keep the window pinned bottom-left
         statusKind: "disconnected", // connected | disconnected | connecting
@@ -609,6 +610,7 @@
                 type: "join",
                 channel: channelName.trim(),
                 role: "plugin",
+                meta: state.fileInfo,
               })
             );
           };
@@ -999,6 +1001,20 @@
           case "connection-status":
             updateConnectionStatus(message.connected, message.message);
             break;
+          case "file-info":
+            state.fileInfo = message.info;
+            // If a page switch/rename happened while connected, push the fresh
+            // context to the relay so the channel listing stays accurate.
+            if (state.connected && state.socket) {
+              state.socket.send(
+                JSON.stringify({
+                  type: "meta",
+                  channel: state.channel,
+                  meta: state.fileInfo,
+                })
+              );
+            }
+            break;
           case "auto-connect":
             connectButton.click();
             break;
@@ -1021,6 +1037,10 @@
             break;
         }
       };
+
+      // The plugin code pushes file-info on startup, but the iframe may not be
+      // listening yet — ask for it once the UI is ready.
+      parent.postMessage({ pluginMessage: { type: "request-file-info" } }, "*");
 
       // Add this to the script section, after all the other event listeners
       document.getElementById("btn-copy").addEventListener("click", () => {

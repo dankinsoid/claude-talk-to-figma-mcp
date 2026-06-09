@@ -108,11 +108,36 @@ function makeProgress(commandType, total, opts) {
 // Show UI
 figma.showUI(__html__, { width: 350, height: 600 });
 
+// @ai-generated(solo)
+// File/page context shown alongside each channel so the agent can tell which
+// document a channel is open in without opening it.
+function getFileInfo() {
+  return {
+    name: figma.root.name,
+    page: figma.currentPage.name,
+    // "figma" | "figjam" | "dev" | "slides" — the document kind.
+    editorType: figma.editorType,
+  };
+}
+
+function sendFileInfo() {
+  figma.ui.postMessage({ type: "file-info", info: getFileInfo() });
+}
+
+// Push fresh context when the user renames the file or switches pages so the
+// relay's record stays accurate without a reconnect.
+figma.on("currentpagechange", sendFileInfo);
+sendFileInfo();
+
 // Plugin commands from UI
 figma.ui.onmessage = async (msg) => {
   switch (msg.type) {
     case "update-settings":
       updateSettings(msg);
+      break;
+    case "request-file-info":
+      // UI loaded/connected after the initial push — answer on demand.
+      sendFileInfo();
       break;
     case "notify":
       figma.notify(msg.message);
@@ -870,6 +895,24 @@ async function setSublayerTextProp(sub, key, value) {
   sub[key] = coerceTypedUnit(key, value); // textAlignHorizontal / letterSpacing / lineHeight
 }
 
+// A CodeBlock paints its text — and syntax-highlight weights — in Source Code
+// Pro, and figma.createCodeBlock()'s `code` setter requires those fonts already
+// loaded. Load every weight the highlighter may reach, best-effort: Medium is
+// the base (its absence is fatal), the rest are skipped if the file lacks them.
+async function loadCodeBlockFonts() {
+  const styles = ["Medium", "Regular", "Semi Bold", "Bold"];
+  let base = false;
+  for (const style of styles) {
+    try {
+      await figma.loadFontAsync({ family: "Source Code Pro", style });
+      if (style === "Medium") base = true;
+    } catch (e) {
+      if (style === "Medium") throw new Error("could not load Source Code Pro Medium (required for CODE_BLOCK `code`)");
+    }
+  }
+  return base;
+}
+
 async function setWriteProp(node, key, value) {
   // FigJam sticky/shape/connector: text-ish props live on node.text, not the node.
   if (TEXT_SUBLAYER_TYPES.has(node.type) && TEXT_SUBLAYER_KEYS.has(key)) {
@@ -885,6 +928,13 @@ async function setWriteProp(node, key, value) {
   if (key === "characters") {
     if (node.type !== "TEXT") throw new Error(`characters can only be set on TEXT nodes, not ${node.type}`);
     await setCharacters(node, String(value)); // loads the node's font (with fallback) itself
+    return;
+  }
+  // CODE_BLOCK renders its text in Source Code Pro; the `code` setter needs that
+  // font loaded first (it doesn't load it itself), so assignment alone throws.
+  if (key === "code" && node.type === "CODE_BLOCK") {
+    await loadCodeBlockFonts();
+    node.code = String(value);
     return;
   }
   if (key === "fontName") {
@@ -2657,6 +2707,11 @@ async function applyEditToNode(node, steps, newValue, oldLeaf, path) {
       const h = topKey === "height" ? Number(newValue) : node.height;
       node.resize(w, h);
       return node[topKey];
+    }
+    if (topKey === "code" && node.type === "CODE_BLOCK") {
+      await loadCodeBlockFonts(); // setter needs Source Code Pro loaded first
+      node.code = String(newValue);
+      return node.code;
     }
     // Style-id binds are read-only under dynamic-page access — use the async setter.
     if (STYLE_ID_SETTERS[topKey]) {

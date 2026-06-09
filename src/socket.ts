@@ -9,19 +9,31 @@ const channels = new Map<string, Set<ServerWebSocket<any>>>();
 
 // Channels opened by a Figma plugin (role: "plugin" on join). Persisted to disk
 // so the MCP server can discover the active channel without joining first.
-const pluginChannels = new Map<ServerWebSocket<any>, string>();
+// meta carries the open file's context: { name, page, editorType }.
+interface PluginChannel {
+  channel: string;
+  meta?: any;
+}
+const pluginChannels = new Map<ServerWebSocket<any>, PluginChannel>();
 
 // Shared with the MCP server (get_active_channel reads this same path).
 const ACTIVE_CHANNELS_FILE = join(tmpdir(), "figma-active-channels.json");
 
 function writeActiveChannels() {
-  const counts = new Map<string, number>();
-  for (const channel of pluginChannels.values()) {
-    counts.set(channel, channels.get(channel)?.size ?? 0);
+  const byChannel = new Map<
+    string,
+    { channel: string; clients: number; meta?: any }
+  >();
+  for (const { channel, meta } of pluginChannels.values()) {
+    const entry =
+      byChannel.get(channel) ??
+      { channel, clients: channels.get(channel)?.size ?? 0 };
+    if (meta) entry.meta = meta;
+    byChannel.set(channel, entry);
   }
   const payload = {
     updatedAt: new Date().toISOString(),
-    channels: [...counts].map(([channel, clients]) => ({ channel, clients })),
+    channels: [...byChannel.values()],
   };
   Bun.write(ACTIVE_CHANNELS_FILE, JSON.stringify(payload, null, 2)).catch((err) =>
     console.error("Failed to write active channels file:", err)
