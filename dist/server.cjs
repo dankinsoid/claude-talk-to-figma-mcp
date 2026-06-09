@@ -1955,6 +1955,86 @@ server.tool(
     }
   }
 );
+var styleSpecShape = {
+  id: import_zod4.z.string().optional().describe("Existing style id (edit_styles: match by id; also accepted on write to fail loudly if reused)"),
+  type: import_zod4.z.enum(["PAINT", "TEXT", "EFFECT", "GRID"]).optional().describe("Style kind \u2014 required for write_styles and for edit_styles when matching by name"),
+  name: import_zod4.z.string().optional().describe("Style name; '/' creates folders (e.g. 'brand/primary'). Required on write."),
+  description: import_zod4.z.string().optional(),
+  // PAINT
+  paints: import_zod4.z.array(import_zod4.z.any()).optional().describe("PAINT: array of Figma Paint objects (SOLID/GRADIENT/IMAGE). Hex strings in a `color` field are accepted."),
+  paint: import_zod4.z.any().optional().describe("PAINT: single Paint object shorthand for one-paint styles"),
+  color: import_zod4.z.string().optional().describe("PAINT: hex shorthand ('#RRGGBB'/'#RRGGBBAA') for a single solid fill"),
+  opacity: import_zod4.z.number().optional().describe("PAINT: opacity 0-1 for the `color` shorthand"),
+  // TEXT
+  fontName: import_zod4.z.object({ family: import_zod4.z.string(), style: import_zod4.z.string() }).optional().describe("TEXT: {family, style} \u2014 loaded before applying"),
+  fontSize: import_zod4.z.number().optional().describe("TEXT: font size in px"),
+  lineHeight: import_zod4.z.any().optional().describe("TEXT: number (PIXELS shorthand) or {value, unit: PIXELS|PERCENT} or {unit: AUTO}"),
+  letterSpacing: import_zod4.z.any().optional().describe("TEXT: number (PIXELS shorthand) or {value, unit: PIXELS|PERCENT}"),
+  paragraphSpacing: import_zod4.z.number().optional().describe("TEXT: spacing between paragraphs in px"),
+  paragraphIndent: import_zod4.z.number().optional().describe("TEXT: first-line indent in px"),
+  textCase: import_zod4.z.enum(["ORIGINAL", "UPPER", "LOWER", "TITLE"]).optional(),
+  textDecoration: import_zod4.z.enum(["NONE", "UNDERLINE", "STRIKETHROUGH"]).optional(),
+  // EFFECT
+  effects: import_zod4.z.array(import_zod4.z.any()).optional().describe("EFFECT: array of Figma Effect objects (DROP_SHADOW/INNER_SHADOW/LAYER_BLUR/BACKGROUND_BLUR). Hex in a `color` field is accepted."),
+  // GRID
+  layoutGrids: import_zod4.z.array(import_zod4.z.any()).optional().describe("GRID: array of Figma LayoutGrid objects (GRID/COLUMNS/ROWS).")
+};
+function styleResultText(verb, result) {
+  const lines = (result.styles || []).map(
+    (s) => s.ok ? `\u2713 ${s.removed ? "removed" : verb} ${s.type} "${s.name}" (${s.id})` : `\u2717 ${s.type || ""} ${s.name || s.id || ""}: ${s.error}`
+  );
+  return `${lines.join("\n")}
+
+${JSON.stringify(result, null, 2)}`;
+}
+server.tool(
+  "write_styles",
+  "Create local Figma styles (paint/color, text, effect, grid). Each entry needs `type` (PAINT|TEXT|EFFECT|GRID) and `name` ('/' makes folders). PAINT: pass `paints` (full Paint array), `paint`, or the `color` hex shorthand. TEXT: `fontName` {family,style} (loaded automatically), `fontSize`, `lineHeight`, `letterSpacing`, `paragraphSpacing`, `paragraphIndent`, `textCase`, `textDecoration`. EFFECT: `effects` (Effect array \u2014 shadows/blurs). GRID: `layoutGrids`. Hex colors are accepted wherever a paint/effect `color` is expected. Use edit_styles to modify an existing style.",
+  {
+    styles: import_zod4.z.array(import_zod4.z.object(styleSpecShape)).min(1).describe("Styles to create")
+  },
+  async ({ styles }) => {
+    try {
+      const result = await sendCommandToFigma("write_styles", { styles });
+      return {
+        content: [
+          { type: "text", text: `Styles created: ${result.created}/${result.total}.
+${styleResultText("created", result)}` }
+        ]
+      };
+    } catch (error) {
+      return {
+        content: [
+          { type: "text", text: `Error creating styles: ${error instanceof Error ? error.message : String(error)}` }
+        ]
+      };
+    }
+  }
+);
+server.tool(
+  "edit_styles",
+  "Update or delete existing local Figma styles. Match each entry by `id` (from get_styles), or by `name` + `type`. Only the fields you pass are changed (partial update) \u2014 same field set as write_styles (name, description, paints/color, font props, effects, layoutGrids). Set `remove: true` to delete the style. To create a new style use write_styles.",
+  {
+    styles: import_zod4.z.array(import_zod4.z.object({ ...styleSpecShape, remove: import_zod4.z.boolean().optional().describe("Delete this style instead of updating it") })).min(1).describe("Styles to update or remove")
+  },
+  async ({ styles }) => {
+    try {
+      const result = await sendCommandToFigma("edit_styles", { styles });
+      return {
+        content: [
+          { type: "text", text: `Styles: ${result.updated} updated, ${result.removed} removed of ${result.total}.
+${styleResultText("updated", result)}` }
+        ]
+      };
+    } catch (error) {
+      return {
+        content: [
+          { type: "text", text: `Error editing styles: ${error instanceof Error ? error.message : String(error)}` }
+        ]
+      };
+    }
+  }
+);
 server.tool(
   "get_local_components",
   "Get all local components from the Figma document",

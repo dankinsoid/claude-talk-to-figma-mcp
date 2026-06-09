@@ -1052,6 +1052,94 @@ server.tool(
   }
 );
 
+// Shared shape for a style spec (used by write_styles / edit_styles).
+const styleSpecShape = {
+  id: z.string().optional().describe("Existing style id (edit_styles: match by id; also accepted on write to fail loudly if reused)"),
+  type: z.enum(["PAINT", "TEXT", "EFFECT", "GRID"]).optional().describe("Style kind — required for write_styles and for edit_styles when matching by name"),
+  name: z.string().optional().describe("Style name; '/' creates folders (e.g. 'brand/primary'). Required on write."),
+  description: z.string().optional(),
+  // PAINT
+  paints: z.array(z.any()).optional().describe("PAINT: array of Figma Paint objects (SOLID/GRADIENT/IMAGE). Hex strings in a `color` field are accepted."),
+  paint: z.any().optional().describe("PAINT: single Paint object shorthand for one-paint styles"),
+  color: z.string().optional().describe("PAINT: hex shorthand ('#RRGGBB'/'#RRGGBBAA') for a single solid fill"),
+  opacity: z.number().optional().describe("PAINT: opacity 0-1 for the `color` shorthand"),
+  // TEXT
+  fontName: z.object({ family: z.string(), style: z.string() }).optional().describe("TEXT: {family, style} — loaded before applying"),
+  fontSize: z.number().optional().describe("TEXT: font size in px"),
+  lineHeight: z.any().optional().describe("TEXT: number (PIXELS shorthand) or {value, unit: PIXELS|PERCENT} or {unit: AUTO}"),
+  letterSpacing: z.any().optional().describe("TEXT: number (PIXELS shorthand) or {value, unit: PIXELS|PERCENT}"),
+  paragraphSpacing: z.number().optional().describe("TEXT: spacing between paragraphs in px"),
+  paragraphIndent: z.number().optional().describe("TEXT: first-line indent in px"),
+  textCase: z.enum(["ORIGINAL", "UPPER", "LOWER", "TITLE"]).optional(),
+  textDecoration: z.enum(["NONE", "UNDERLINE", "STRIKETHROUGH"]).optional(),
+  // EFFECT
+  effects: z.array(z.any()).optional().describe("EFFECT: array of Figma Effect objects (DROP_SHADOW/INNER_SHADOW/LAYER_BLUR/BACKGROUND_BLUR). Hex in a `color` field is accepted."),
+  // GRID
+  layoutGrids: z.array(z.any()).optional().describe("GRID: array of Figma LayoutGrid objects (GRID/COLUMNS/ROWS)."),
+};
+
+function styleResultText(verb: string, result: any): string {
+  const lines = (result.styles || []).map((s: any) =>
+    s.ok
+      ? `✓ ${s.removed ? "removed" : verb} ${s.type} "${s.name}" (${s.id})`
+      : `✗ ${s.type || ""} ${s.name || s.id || ""}: ${s.error}`
+  );
+  return `${lines.join("\n")}\n\n${JSON.stringify(result, null, 2)}`;
+}
+
+// Create Styles Tool
+server.tool(
+  "write_styles",
+  "Create local Figma styles (paint/color, text, effect, grid). Each entry needs `type` (PAINT|TEXT|EFFECT|GRID) and `name` ('/' makes folders). PAINT: pass `paints` (full Paint array), `paint`, or the `color` hex shorthand. TEXT: `fontName` {family,style} (loaded automatically), `fontSize`, `lineHeight`, `letterSpacing`, `paragraphSpacing`, `paragraphIndent`, `textCase`, `textDecoration`. EFFECT: `effects` (Effect array — shadows/blurs). GRID: `layoutGrids`. Hex colors are accepted wherever a paint/effect `color` is expected. Use edit_styles to modify an existing style.",
+  {
+    styles: z.array(z.object(styleSpecShape)).min(1).describe("Styles to create"),
+  },
+  async ({ styles }: any) => {
+    try {
+      const result: any = await sendCommandToFigma("write_styles", { styles });
+      return {
+        content: [
+          { type: "text", text: `Styles created: ${result.created}/${result.total}.\n${styleResultText("created", result)}` },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          { type: "text", text: `Error creating styles: ${error instanceof Error ? error.message : String(error)}` },
+        ],
+      };
+    }
+  }
+);
+
+// Edit Styles Tool
+server.tool(
+  "edit_styles",
+  "Update or delete existing local Figma styles. Match each entry by `id` (from get_styles), or by `name` + `type`. Only the fields you pass are changed (partial update) — same field set as write_styles (name, description, paints/color, font props, effects, layoutGrids). Set `remove: true` to delete the style. To create a new style use write_styles.",
+  {
+    styles: z
+      .array(z.object({ ...styleSpecShape, remove: z.boolean().optional().describe("Delete this style instead of updating it") }))
+      .min(1)
+      .describe("Styles to update or remove"),
+  },
+  async ({ styles }: any) => {
+    try {
+      const result: any = await sendCommandToFigma("edit_styles", { styles });
+      return {
+        content: [
+          { type: "text", text: `Styles: ${result.updated} updated, ${result.removed} removed of ${result.total}.\n${styleResultText("updated", result)}` },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          { type: "text", text: `Error editing styles: ${error instanceof Error ? error.message : String(error)}` },
+        ],
+      };
+    }
+  }
+);
+
 // Get Local Components Tool
 server.tool(
   "get_local_components",
@@ -2371,6 +2459,8 @@ type FigmaCommand =
   | "write_nodes"
   | "delete_nodes"
   | "get_styles"
+  | "write_styles"
+  | "edit_styles"
   | "get_local_components"
   | "get_instance_overrides"
   | "set_instance_overrides"
@@ -2410,6 +2500,8 @@ type CommandParams = {
     nodeIds: string[];
   };
   get_styles: Record<string, never>;
+  write_styles: { styles: Array<Record<string, any>> };
+  edit_styles: { styles: Array<Record<string, any>> };
   get_local_components: Record<string, never>;
   get_team_components: Record<string, never>;
   get_instance_overrides: {

@@ -192,6 +192,10 @@ async function handleCommand(command, params) {
       return await deleteNodes(params);
     case "get_styles":
       return await getStyles();
+    case "write_styles":
+      return await writeStyles(params);
+    case "edit_styles":
+      return await editStyles(params);
     case "get_local_components":
       return await getLocalComponents(params);
     // case "get_team_components":
@@ -996,6 +1000,140 @@ async function getStyles() {
       key: style.key,
     })),
   };
+}
+
+const STYLE_FACTORIES = {
+  PAINT: () => figma.createPaintStyle(),
+  TEXT: () => figma.createTextStyle(),
+  EFFECT: () => figma.createEffectStyle(),
+  GRID: () => figma.createGridStyle(),
+};
+
+async function localStylesOfType(type) {
+  switch (type) {
+    case "PAINT": return await figma.getLocalPaintStylesAsync();
+    case "TEXT": return await figma.getLocalTextStylesAsync();
+    case "EFFECT": return await figma.getLocalEffectStylesAsync();
+    case "GRID": return await figma.getLocalGridStylesAsync();
+    default: throw new Error(`unsupported style type "${type}" (PAINT|TEXT|EFFECT|GRID)`);
+  }
+}
+
+// PAINT styles accept the full `paints` array, a single `paint`, or a `color`
+// hex shorthand for the common one-solid case. Hex colors anywhere are converted
+// by coerceColors (same path as node fills).
+function stylePaintsFromSpec(spec) {
+  if (spec.paints !== undefined) return coerceColors(spec.paints);
+  if (spec.paint !== undefined) return coerceColors([spec.paint]);
+  if (typeof spec.color === "string") {
+    const rgb = hexToRgb01(spec.color);
+    if (!rgb) throw new Error(`invalid hex color "${spec.color}"`);
+    const p = { type: "SOLID", color: { r: rgb.r, g: rgb.g, b: rgb.b } };
+    if (typeof rgb.a === "number" && rgb.a !== 1) p.opacity = rgb.a;
+    if (typeof spec.opacity === "number") p.opacity = spec.opacity;
+    return [p];
+  }
+  return undefined;
+}
+
+// Write the per-type properties onto a style object. Shared by write_styles
+// (fresh style) and edit_styles (existing style). Only keys present in `spec`
+// are touched, so edits are partial.
+async function applyStyleProps(style, spec) {
+  if (typeof spec.name === "string") style.name = spec.name;
+  if (typeof spec.description === "string") style.description = spec.description;
+
+  if (style.type === "PAINT") {
+    const paints = stylePaintsFromSpec(spec);
+    if (paints !== undefined) style.paints = paints;
+  } else if (style.type === "TEXT") {
+    // Any text prop on a TextStyle requires its font to be loaded first; load the
+    // incoming font (or the style's current one) before writing.
+    const targetFont = spec.fontName || style.fontName;
+    if (targetFont && targetFont !== figma.mixed) await figma.loadFontAsync(targetFont);
+    if (spec.fontName !== undefined) style.fontName = spec.fontName;
+    if (spec.fontSize !== undefined) style.fontSize = spec.fontSize;
+    if (spec.lineHeight !== undefined) style.lineHeight = coerceTypedUnit("lineHeight", spec.lineHeight);
+    if (spec.letterSpacing !== undefined) style.letterSpacing = coerceTypedUnit("letterSpacing", spec.letterSpacing);
+    if (spec.paragraphSpacing !== undefined) style.paragraphSpacing = spec.paragraphSpacing;
+    if (spec.paragraphIndent !== undefined) style.paragraphIndent = spec.paragraphIndent;
+    if (spec.textCase !== undefined) style.textCase = spec.textCase;
+    if (spec.textDecoration !== undefined) style.textDecoration = spec.textDecoration;
+  } else if (style.type === "EFFECT") {
+    if (spec.effects !== undefined) style.effects = coerceColors(spec.effects);
+  } else if (style.type === "GRID") {
+    if (spec.layoutGrids !== undefined) style.layoutGrids = coerceColors(spec.layoutGrids);
+  }
+}
+
+async function resolveStyle(spec) {
+  if (spec.id) {
+    const s = await figma.getStyleByIdAsync(spec.id);
+    if (!s) throw new Error("style not found by id: " + spec.id);
+    return s;
+  }
+  if (spec.name && spec.type) {
+    const type = String(spec.type).toUpperCase();
+    const list = await localStylesOfType(type);
+    return list.find((s) => s.name === spec.name) || null;
+  }
+  throw new Error("edit_styles entry needs `id`, or `name` + `type`");
+}
+
+async function writeStyles(params) {
+  const input = (params && params.styles) || [];
+  if (!Array.isArray(input) || input.length === 0) {
+    throw new Error("write_styles requires a non-empty `styles` array");
+  }
+  const out = [];
+  for (const spec of input) {
+    const type = String((spec && spec.type) || "").toUpperCase();
+    const make = STYLE_FACTORIES[type];
+    if (!make) {
+      out.push({ ok: false, type: spec && spec.type, error: `unsupported style type "${spec && spec.type}" (PAINT|TEXT|EFFECT|GRID)` });
+      continue;
+    }
+    if (!spec.name) {
+      out.push({ ok: false, type, error: "style needs a `name`" });
+      continue;
+    }
+    let style;
+    try {
+      style = make();
+      style.name = spec.name;
+      await applyStyleProps(style, spec);
+      out.push({ ok: true, id: style.id, key: style.key, name: style.name, type: style.type });
+    } catch (e) {
+      if (style) { try { style.remove(); } catch (_) {} } // no half-created style on failure
+      out.push({ ok: false, type, error: e && e.message ? e.message : String(e) });
+    }
+  }
+  return { styles: out, created: out.filter((s) => s.ok).length, total: input.length };
+}
+
+async function editStyles(params) {
+  const input = (params && params.styles) || [];
+  if (!Array.isArray(input) || input.length === 0) {
+    throw new Error("edit_styles requires a non-empty `styles` array");
+  }
+  const out = [];
+  for (const spec of input) {
+    try {
+      const style = await resolveStyle(spec);
+      if (!style) throw new Error("style not found: " + (spec.name || spec.id));
+      if (spec.remove === true) {
+        const info = { ok: true, id: style.id, name: style.name, type: style.type, removed: true };
+        style.remove();
+        out.push(info);
+        continue;
+      }
+      await applyStyleProps(style, spec);
+      out.push({ ok: true, id: style.id, key: style.key, name: style.name, type: style.type });
+    } catch (e) {
+      out.push({ ok: false, id: spec && spec.id, name: spec && spec.name, error: e && e.message ? e.message : String(e) });
+    }
+  }
+  return { styles: out, updated: out.filter((s) => s.ok && !s.removed).length, removed: out.filter((s) => s.removed).length, total: input.length };
 }
 
 async function getLocalComponents(params) {
