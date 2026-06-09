@@ -56,14 +56,21 @@ function resolveOne(id: string): string {
   return full;
 }
 
-// Param keys whose values are node-id references. Free-text params (text, name,
-// characters) are deliberately excluded so a literal value like "n5" is untouched.
+// Param keys whose values are node/component-id references — every such key
+// across all tools, so any request accepts short ids interchangeably with full
+// ids. Free-text params (text, name, characters) and foreign id namespaces
+// (annotationId, categoryId) are deliberately excluded so a literal value like
+// "n5" is untouched. Non-short values pass through unchanged regardless.
 const ID_KEYS = new Set([
   "nodeId",
   "nodeIds",
   "parentId",
   "targetNodeIds",
   "sourceInstanceId",
+  "componentId",
+  "startNodeId",
+  "endNodeId",
+  "connectorId",
 ]);
 
 /**
