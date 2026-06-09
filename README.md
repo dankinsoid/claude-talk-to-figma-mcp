@@ -170,8 +170,7 @@ The MCP server provides the following tools for interacting with Figma:
 
 ### Layout & Organization
 
-- `delete_node` - Delete a node
-- `delete_multiple_nodes` - Delete multiple nodes at once efficiently
+- `delete_nodes` - Delete one or more nodes (chunked with progress for large batches)
 - `clone_node` - Create a copy of an existing node with optional position offset
 
 ### Components & Styles

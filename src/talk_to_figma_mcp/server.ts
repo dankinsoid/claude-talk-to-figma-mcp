@@ -808,48 +808,16 @@ server.tool(
   }
 );
 
-// Delete Node Tool
+// Delete Nodes Tool
 server.tool(
-  "delete_node",
-  "Delete a node from Figma",
-  {
-    nodeId: z.string().describe("The ID of the node to delete"),
-  },
-  async ({ nodeId }: any) => {
-    try {
-      await sendCommandToFigma("delete_node", { nodeId });
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Deleted node with ID: ${nodeId}`,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error deleting node: ${error instanceof Error ? error.message : String(error)
-              }`,
-          },
-        ],
-      };
-    }
-  }
-);
-
-// Delete Multiple Nodes Tool
-server.tool(
-  "delete_multiple_nodes",
-  "Delete multiple nodes from Figma at once",
+  "delete_nodes",
+  "Delete one or more nodes from Figma. Large batches are chunked with progress updates.",
   {
     nodeIds: z.array(z.string()).describe("Array of node IDs to delete"),
   },
   async ({ nodeIds }: any) => {
     try {
-      const result = await sendCommandToFigma("delete_multiple_nodes", { nodeIds });
+      const result = await sendCommandToFigma("delete_nodes", { nodeIds });
       return {
         content: [
           {
@@ -863,7 +831,7 @@ server.tool(
         content: [
           {
             type: "text",
-            text: `Error deleting multiple nodes: ${error instanceof Error ? error.message : String(error)
+            text: `Error deleting nodes: ${error instanceof Error ? error.message : String(error)
               }`,
           },
         ],
@@ -1996,8 +1964,7 @@ type FigmaCommand =
   | "write_nodes"
   | "set_fill_color"
   | "set_stroke_color"
-  | "delete_node"
-  | "delete_multiple_nodes"
+  | "delete_nodes"
   | "get_styles"
   | "get_local_components"
   | "get_instance_overrides"
@@ -2041,10 +2008,7 @@ type CommandParams = {
     a?: number;
     weight?: number;
   };
-  delete_node: {
-    nodeId: string;
-  };
-  delete_multiple_nodes: {
+  delete_nodes: {
     nodeIds: string[];
   };
   get_styles: Record<string, never>;

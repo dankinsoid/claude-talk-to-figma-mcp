@@ -159,10 +159,8 @@ async function handleCommand(command, params) {
       return await setFillColor(params);
     case "set_stroke_color":
       return await setStrokeColor(params);
-    case "delete_node":
-      return await deleteNode(params);
-    case "delete_multiple_nodes":
-      return await deleteMultipleNodes(params);
+    case "delete_nodes":
+      return await deleteNodes(params);
     case "get_styles":
       return await getStyles();
     case "get_local_components":
@@ -955,30 +953,6 @@ async function setStrokeColor(params) {
     strokes: node.strokes,
     strokeWeight: "strokeWeight" in node ? node.strokeWeight : undefined,
   };
-}
-
-async function deleteNode(params) {
-  const { nodeId } = params || {};
-
-  if (!nodeId) {
-    throw new Error("Missing nodeId parameter");
-  }
-
-  const node = await figma.getNodeByIdAsync(nodeId);
-  if (!node) {
-    throw new Error(`Node not found with ID: ${nodeId}`);
-  }
-
-  // Save node info before deleting
-  const nodeInfo = {
-    id: node.id,
-    name: node.name,
-    type: node.type,
-  };
-
-  node.remove();
-
-  return nodeInfo;
 }
 
 async function getStyles() {
@@ -2418,7 +2392,7 @@ async function setMultipleAnnotations(params) {
   return summary;
 }
 
-async function deleteMultipleNodes(params) {
+async function deleteNodes(params) {
   const { nodeIds } = params || {};
   const commandId = generateCommandId();
 
@@ -2426,7 +2400,7 @@ async function deleteMultipleNodes(params) {
     const errorMsg = "Missing or invalid nodeIds parameter";
     sendProgressUpdate(
       commandId,
-      "delete_multiple_nodes",
+      "delete_nodes",
       "error",
       0,
       0,
@@ -2442,7 +2416,7 @@ async function deleteMultipleNodes(params) {
   // Send started progress update
   sendProgressUpdate(
     commandId,
-    "delete_multiple_nodes",
+    "delete_nodes",
     "started",
     0,
     nodeIds.length,
@@ -2468,7 +2442,7 @@ async function deleteMultipleNodes(params) {
   // Send chunking info update
   sendProgressUpdate(
     commandId,
-    "delete_multiple_nodes",
+    "delete_nodes",
     "in_progress",
     5,
     nodeIds.length,
@@ -2492,7 +2466,7 @@ async function deleteMultipleNodes(params) {
     // Send chunk processing start update
     sendProgressUpdate(
       commandId,
-      "delete_multiple_nodes",
+      "delete_nodes",
       "in_progress",
       Math.round(5 + (chunkIndex / chunks.length) * 90),
       nodeIds.length,
@@ -2562,7 +2536,7 @@ async function deleteMultipleNodes(params) {
     // Send chunk processing complete update
     sendProgressUpdate(
       commandId,
-      "delete_multiple_nodes",
+      "delete_nodes",
       "in_progress",
       Math.round(5 + ((chunkIndex + 1) / chunks.length) * 90),
       nodeIds.length,
@@ -2592,7 +2566,7 @@ async function deleteMultipleNodes(params) {
   // Send completed progress update
   sendProgressUpdate(
     commandId,
-    "delete_multiple_nodes",
+    "delete_nodes",
     "completed",
     100,
     nodeIds.length,
