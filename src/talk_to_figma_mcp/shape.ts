@@ -17,19 +17,16 @@
 //   text                        — characters (no font styling)
 //   hidden: true                — for a non-root node with visible:false (id only)
 //
-// A depth/node budget cuts the tree and leaves drill-in stubs ({childCount,
+// A depth cap (default 6) cuts the tree and leaves drill-in stubs ({childCount,
 // more:true}); icon-like subtrees collapse to one ICON line; repeated instances
 // of the same component collapse to the first copy plus stubs carrying the
 // differentiating props/text.
 
 export interface ShapeOptions {
   /**
-   * Soft node budget: the tree expands breadth-first until ~this many nodes are
-   * emitted, then the rest become drill-in stubs. Keeps response size roughly
-   * constant regardless of tree shape. Default 100.
+   * Hard depth cap: levels of children below the requested root. Nodes deeper
+   * than this become drill-in stubs ({childCount, more:true}). Default 6.
    */
-  maxNodes?: number;
-  /** Optional hard depth cap (levels of children). Default: unbounded (budget governs). */
   depth?: number;
   /** Collapse icon-like subtrees (no text, vector leaves) to one ICON node. */
   collapseIcons?: boolean;
@@ -348,30 +345,22 @@ function collectText(node: any, acc: string[], cap: number): void {
 }
 
 /**
- * Breadth-first expansion plan. Walks the tree level by level admitting nodes
- * until the budget runs out; nodes beyond it are recorded as stubs. Returns the
- * set of node ids whose children should be expanded inline. Icons and depth-cap
- * boundaries are not expanded. This decouples "how much to show" from the
- * render pass so size stays predictable across wide and deep trees alike.
+ * Expansion plan: the set of node ids whose children render inline. A node's
+ * children expand while within the depth cap; past it (or under an icon /
+ * repeated instance) they become drill-in stubs.
  */
 function planExpansion(root: any, opts: Required<ShapeOptions>, repeats: Set<string>): Set<string> {
   const expand = new Set<string>([root.id]);
-  let count = 1; // root always shown
   const queue: { node: any; depth: number }[] = [{ node: root, depth: 0 }];
   while (queue.length) {
     const { node, depth } = queue.shift()!;
     if (opts.collapseIcons && isIcon(node, depth)) continue; // icon: children hidden
     if (repeats.has(node.id)) continue; // repeated instance: children hidden
+    if (depth + 1 > opts.depth) continue; // depth cap: children become stubs
     const kids: any[] = node.children || [];
-    if (!kids.length) continue;
-    const underCap = depth + 1 <= opts.depth;
     for (const kid of kids) {
-      count++; // kid appears (full or stub)
-      if (count <= opts.maxNodes && underCap) {
-        expand.add(kid.id);
-        queue.push({ node: kid, depth: depth + 1 });
-      }
-      // else: kid stays a stub — not added to expand, not enqueued
+      expand.add(kid.id);
+      queue.push({ node: kid, depth: depth + 1 });
     }
   }
   return expand;
@@ -504,8 +493,7 @@ function shapeRec(
  */
 export function shapeNode(node: any, options: ShapeOptions = {}): any {
   const opts: Required<ShapeOptions> = {
-    maxNodes: options.maxNodes ?? 100,
-    depth: options.depth ?? Infinity,
+    depth: options.depth ?? 6,
     collapseIcons: options.collapseIcons ?? true,
     collapseRepeats: options.collapseRepeats ?? true,
     cull: options.cull ?? true,

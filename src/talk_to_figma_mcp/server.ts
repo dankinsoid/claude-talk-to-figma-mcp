@@ -192,18 +192,12 @@ server.tool(
 // view: structure + text + integer boxes, 2 levels deep, icons collapsed.
 // Drill deeper by re-calling with a child nodeId and/or a larger depth.
 const shapeParams = {
-  maxNodes: z
-    .number()
-    .int()
-    .min(1)
-    .optional()
-    .describe("Soft node budget (default 100). The tree expands breadth-first until ~this many nodes are emitted; the rest become stubs with {childCount, more:true}. Raise to see more at once, lower for a terser overview."),
   depth: z
     .number()
     .int()
     .min(0)
     .optional()
-    .describe("Optional hard cap on levels of children (default: unbounded — the node budget governs). Stubbed nodes carry {childCount, more:true}; re-request that id to zoom in."),
+    .describe("Levels of children below the requested node to expand (default 6). Deeper nodes become stubs with {childCount, more:true}; re-request that id to zoom in. Raise to see more at once, lower for a terser overview."),
   collapseIcons: z
     .boolean()
     .optional()
@@ -219,7 +213,6 @@ const shapeParams = {
 };
 
 type ShapeArgs = {
-  maxNodes?: number;
   depth?: number;
   collapseIcons?: boolean;
   collapseRepeats?: boolean;
@@ -234,9 +227,9 @@ server.tool(
     ...shapeParams,
     ...saveParams,
   },
-  async ({ maxNodes, depth, collapseIcons, collapseRepeats, cull, saveToFile, outputPath }: any) => {
+  async ({ depth, collapseIcons, collapseRepeats, cull, saveToFile, outputPath }: any) => {
     try {
-      const opts: ShapeArgs = { maxNodes, depth, collapseIcons, collapseRepeats, cull };
+      const opts: ShapeArgs = { depth, collapseIcons, collapseRepeats, cull };
       const result = await sendCommandToFigma("read_my_design", {});
       const shaped = Array.isArray(result)
         ? result.map((r: any) => (r && r.document ? { ...r, document: shapeNode(r.document, opts) } : r))
@@ -261,16 +254,16 @@ server.tool(
 // Node Info Tool
 server.tool(
   "get_node_info",
-  "Get information about a specific node in Figma, compacted for low token cost. Returns a fixed minimal field set per node (id, name, type, color/gradient, opacity, box or autoLayout, text); raise depth/maxNodes to zoom in on stubbed subtrees.",
+  "Get information about a specific node in Figma, compacted for low token cost. Returns a fixed minimal field set per node (id, name, type, color/gradient, opacity, box or autoLayout, text); children expand to depth 6 by default — raise depth or re-request a stub's id to zoom in.",
   {
     nodeId: z.string().describe("The ID of the node to get information about"),
     ...shapeParams,
     ...saveParams,
   },
-  async ({ nodeId, maxNodes, depth, collapseIcons, collapseRepeats, cull, saveToFile, outputPath }: any) => {
+  async ({ nodeId, depth, collapseIcons, collapseRepeats, cull, saveToFile, outputPath }: any) => {
     try {
       const result = await sendCommandToFigma("get_node_info", { nodeId });
-      const shaped = shapeNode(result, { maxNodes, depth, collapseIcons, collapseRepeats, cull });
+      const shaped = shapeNode(result, { depth, collapseIcons, collapseRepeats, cull });
       return {
         content: [await jsonContent(shaped, { saveToFile, outputPath }, "node-info")]
       };
@@ -400,9 +393,9 @@ server.tool(
     ...shapeParams,
     ...saveParams,
   },
-  async ({ nodeIds, maxNodes, depth, collapseIcons, collapseRepeats, cull, saveToFile, outputPath }: any) => {
+  async ({ nodeIds, depth, collapseIcons, collapseRepeats, cull, saveToFile, outputPath }: any) => {
     try {
-      const opts: ShapeArgs = { maxNodes, depth, collapseIcons, collapseRepeats, cull };
+      const opts: ShapeArgs = { depth, collapseIcons, collapseRepeats, cull };
       const results = await Promise.all(
         nodeIds.map(async (nodeId: any) => {
           const result = await sendCommandToFigma('get_node_info', { nodeId });
