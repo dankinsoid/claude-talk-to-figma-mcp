@@ -358,7 +358,9 @@ var ID_KEYS = /* @__PURE__ */ new Set([
   "componentId",
   "startNodeId",
   "endNodeId",
-  "connectorId"
+  "connectorId",
+  "destinationId"
+  // set_reactions: NODE-action target, nested in actions[]
 ]);
 function resolveShortIdsInParams(value, key = "") {
   if (Array.isArray(value)) return value.map((v) => resolveShortIdsInParams(v, key));

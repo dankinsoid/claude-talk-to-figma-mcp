@@ -72,6 +72,7 @@ const ID_KEYS = new Set([
   "startNodeId",
   "endNodeId",
   "connectorId",
+  "destinationId", // set_reactions: NODE-action target, nested in actions[]
 ]);
 
 /**
