@@ -355,7 +355,7 @@ server.tool(
 // Glob Tool — flat, grep-friendly index of a subtree
 server.tool(
   "glob_nodes",
-  "List nodes under a root by type and/or name glob, one per line as `id:\"name\".TYPE @parent` — a flat, grep-friendly index of a subtree (the Figma analog of glob / `ls -R`). The trailing `@parent` is the immediate container's short id, giving each hit a location without drawing the tree; pass it to get_node_info to see surroundings. Filters: `type` (a node type, an array of them, or \"*\"/omit for any) and `name` (a shell-style glob over the node's OWN name: `*` = any run, `?` = one char; omit for any). Matches names only, not paths — Figma names contain slashes. `root` is the node id to search under (default: current page); descends through every container regardless of match (any-depth search), with `depth` capping how deep. Ids (including `@parent`) are short counters (n0, n1, ...) — feed any straight into read/edit tools.",
+  "List nodes under a root by type and/or name glob, one per line as `id:\"name\".TYPE @parent [x,y wxh]` — a flat, grep-friendly index of a subtree (the Figma analog of glob / `ls -R`). The `@parent` is the immediate container's short id (location without drawing the tree; pass it to get_node_info to see surroundings). The trailing `[x,y wxh]` is the node's ABSOLUTE bounding box (omitted with `bbox:false`, or when a node has no geometry). Filters: `type` (a node type, an array, or \"*\"/omit for any); `name` (a shell-style glob over the node's OWN name: `*` = any run, `?` = one char; omit for any — matches names only, not paths, since Figma names contain slashes); and `within` (an absolute rect — keep only nodes intersecting it, e.g. to glob a region; get its coords from a prior bbox). `root` is the node id to search under (default: current page); descends through every container regardless of match (any-depth search), with `depth` capping how deep. Ids (including `@parent`) are short counters (n0, n1, ...) — feed any straight into read/edit tools.",
   {
     root: z
       .string()
@@ -373,18 +373,32 @@ server.tool(
       .number()
       .optional()
       .describe("Max depth below root to descend (root's direct children = 1). Omit for unlimited."),
+    bbox: z
+      .boolean()
+      .optional()
+      .describe("Append each hit's absolute bounding box as [x,y wxh]. Default true; pass false to drop it and save tokens."),
+    within: z
+      .object({
+        x: z.number(),
+        y: z.number(),
+        width: z.number(),
+        height: z.number(),
+      })
+      .optional()
+      .describe("Absolute rectangle; keep only nodes whose bounding box intersects it. Coordinates are absolute (same space as the [x,y wxh] output). Use to glob a visual region."),
     ...saveParams,
   },
-  async ({ root, name, type, depth, saveToFile, outputPath }: any) => {
+  async ({ root, name, type, depth, bbox, within, saveToFile, outputPath }: any) => {
     try {
-      const result: any = await sendCommandToFigma("glob_nodes", { root, name, type, depth });
+      const result: any = await sendCommandToFigma("glob_nodes", { root, name, type, depth, bbox, within });
       // renumberIds shortens each match's `id`; parentId shares the same map, so
       // a hit and its parent get the same short id (idempotent shortening).
       const matches = renumberIds(result?.matches || []);
       const lines = matches
         .map((m: any) => {
           const parent = m.parentId ? renumberIds({ id: m.parentId }).id : null;
-          return `${m.id}:${JSON.stringify(m.name)}.${m.type}${parent ? ` @${parent}` : ""}`;
+          const box = m.bbox ? ` [${m.bbox.x},${m.bbox.y} ${m.bbox.w}x${m.bbox.h}]` : "";
+          return `${m.id}:${JSON.stringify(m.name)}.${m.type}${parent ? ` @${parent}` : ""}${box}`;
         })
         .join("\n");
       const text = lines || "(no matches)";
@@ -2889,6 +2903,8 @@ type CommandParams = {
     name?: string;
     type?: string | Array<string>;
     depth?: number;
+    bbox?: boolean;
+    within?: { x: number; y: number; width: number; height: number };
   };
   get_reactions: { nodeIds: string[] };
   set_default_connector: {

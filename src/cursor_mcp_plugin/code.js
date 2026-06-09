@@ -2637,16 +2637,18 @@ async function setAnnotation(params) {
 /**
  * Flat, glob-style index of a subtree. Walks every container under `root`
  * (so any-depth `**` search) and collects nodes matching an optional type
- * filter and an optional shell-style name glob.
+ * filter, name glob, and spatial filter (within a rect / the viewport).
  * @param {Object} params
  * @param {string} [params.root] - Node id to search under; defaults to current page.
  * @param {string} [params.name] - Name glob (* = any run, ? = one char). Omit = any.
  * @param {string|string[]} [params.type] - Type filter; a type, an array, or "*"/omit = any.
  * @param {number} [params.depth] - Max depth below root (direct children = 1). Omit = unlimited.
- * @returns {Promise<{count:number, matches:Array<{id,name,type}>}>}
+ * @param {boolean} [params.bbox=true] - Include each hit's absolute bbox. Pass false to omit.
+ * @param {{x,y,width,height}} [params.within] - Keep only nodes intersecting this absolute rect.
+ * @returns {Promise<{count:number, matches:Array<{id,name,type,parentId,bbox?}>}>}
  */
 async function globNodes(params) {
-  const { root, name, type, depth } = params || {};
+  const { root, name, type, depth, bbox, within } = params || {};
 
   let rootNode;
   if (root) {
@@ -2663,20 +2665,37 @@ async function globNodes(params) {
     typeSet = new Set(arr.map((t) => String(t).toUpperCase()));
   }
 
+  // Spatial filter region (absolute coords); null = no spatial filter.
+  // Intersect semantics → a node partially inside still counts as a hit.
+  const region = within
+    ? { x: within.x, y: within.y, width: within.width, height: within.height }
+    : null;
+
   const nameRe = name ? globToRegExp(name) : null;
   const maxDepth = typeof depth === "number" ? depth : Infinity;
+  const includeBbox = bbox !== false; // default on
   const matches = [];
 
   // Descend through every container regardless of whether it matched, so the
   // search is any-depth; the root itself (d===0) is the container, not a hit.
+  // Descent is never pruned by the spatial filter — a child can overflow its
+  // parent's box (clipping off), so geometry gates the match, not the walk.
   // parentId carries the immediate container id so the flat output can show
   // each hit's location (@parent) without reconstructing the tree.
   const walk = (node, d, parentId) => {
-    if (d > 0) {
-      const typeOk = !typeSet || typeSet.has(node.type);
-      const nameOk = !nameRe || nameRe.test(node.name || "");
-      if (typeOk && nameOk) {
-        matches.push({ id: node.id, name: node.name || "", type: node.type, parentId });
+    if (d > 0 && (!typeSet || typeSet.has(node.type)) && (!nameRe || nameRe.test(node.name || ""))) {
+      const abox = node.absoluteBoundingBox || null; // null for geometry-less nodes
+      if (!region || (abox && rectsIntersect(abox, region))) {
+        const m = { id: node.id, name: node.name || "", type: node.type, parentId };
+        if (includeBbox && abox) {
+          m.bbox = {
+            x: Math.round(abox.x),
+            y: Math.round(abox.y),
+            w: Math.round(abox.width),
+            h: Math.round(abox.height),
+          };
+        }
+        matches.push(m);
       }
     }
     if (d < maxDepth && "children" in node) {
@@ -2686,6 +2705,16 @@ async function globNodes(params) {
   walk(rootNode, 0, null);
 
   return { count: matches.length, matches };
+}
+
+/** Axis-aligned rectangle overlap test (touching edges do not count). */
+function rectsIntersect(a, b) {
+  return (
+    a.x < b.x + b.width &&
+    a.x + a.width > b.x &&
+    a.y < b.y + b.height &&
+    a.y + a.height > b.y
+  );
 }
 
 /**

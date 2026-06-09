@@ -599,21 +599,29 @@ server.tool(
 );
 server.tool(
   "glob_nodes",
-  'List nodes under a root by type and/or name glob, one per line as `id:"name".TYPE @parent` \u2014 a flat, grep-friendly index of a subtree (the Figma analog of glob / `ls -R`). The trailing `@parent` is the immediate container\'s short id, giving each hit a location without drawing the tree; pass it to get_node_info to see surroundings. Filters: `type` (a node type, an array of them, or "*"/omit for any) and `name` (a shell-style glob over the node\'s OWN name: `*` = any run, `?` = one char; omit for any). Matches names only, not paths \u2014 Figma names contain slashes. `root` is the node id to search under (default: current page); descends through every container regardless of match (any-depth search), with `depth` capping how deep. Ids (including `@parent`) are short counters (n0, n1, ...) \u2014 feed any straight into read/edit tools.',
+  'List nodes under a root by type and/or name glob, one per line as `id:"name".TYPE @parent [x,y wxh]` \u2014 a flat, grep-friendly index of a subtree (the Figma analog of glob / `ls -R`). The `@parent` is the immediate container\'s short id (location without drawing the tree; pass it to get_node_info to see surroundings). The trailing `[x,y wxh]` is the node\'s ABSOLUTE bounding box (omitted with `bbox:false`, or when a node has no geometry). Filters: `type` (a node type, an array, or "*"/omit for any); `name` (a shell-style glob over the node\'s OWN name: `*` = any run, `?` = one char; omit for any \u2014 matches names only, not paths, since Figma names contain slashes); and `within` (an absolute rect \u2014 keep only nodes intersecting it, e.g. to glob a region; get its coords from a prior bbox). `root` is the node id to search under (default: current page); descends through every container regardless of match (any-depth search), with `depth` capping how deep. Ids (including `@parent`) are short counters (n0, n1, ...) \u2014 feed any straight into read/edit tools.',
   {
     root: import_zod.z.string().optional().describe("Node id to search under. Defaults to the current page. Accepts short ids (n0, ...)."),
     name: import_zod.z.string().optional().describe("Shell-style glob matched against each node's own name (* = any run, ? = one char). Case-insensitive. Omit to match any name."),
     type: import_zod.z.union([import_zod.z.string(), import_zod.z.array(import_zod.z.string())]).optional().describe('Node type filter: a single type (e.g. "TEXT"), an array (["TEXT","INSTANCE"]), or "*"/omit for any. Case-insensitive.'),
     depth: import_zod.z.number().optional().describe("Max depth below root to descend (root's direct children = 1). Omit for unlimited."),
+    bbox: import_zod.z.boolean().optional().describe("Append each hit's absolute bounding box as [x,y wxh]. Default true; pass false to drop it and save tokens."),
+    within: import_zod.z.object({
+      x: import_zod.z.number(),
+      y: import_zod.z.number(),
+      width: import_zod.z.number(),
+      height: import_zod.z.number()
+    }).optional().describe("Absolute rectangle; keep only nodes whose bounding box intersects it. Coordinates are absolute (same space as the [x,y wxh] output). Use to glob a visual region."),
     ...saveParams
   },
-  async ({ root, name, type, depth, saveToFile, outputPath }) => {
+  async ({ root, name, type, depth, bbox, within, saveToFile, outputPath }) => {
     try {
-      const result = await sendCommandToFigma("glob_nodes", { root, name, type, depth });
+      const result = await sendCommandToFigma("glob_nodes", { root, name, type, depth, bbox, within });
       const matches = renumberIds(result?.matches || []);
       const lines = matches.map((m) => {
         const parent = m.parentId ? renumberIds({ id: m.parentId }).id : null;
-        return `${m.id}:${JSON.stringify(m.name)}.${m.type}${parent ? ` @${parent}` : ""}`;
+        const box2 = m.bbox ? ` [${m.bbox.x},${m.bbox.y} ${m.bbox.w}x${m.bbox.h}]` : "";
+        return `${m.id}:${JSON.stringify(m.name)}.${m.type}${parent ? ` @${parent}` : ""}${box2}`;
       }).join("\n");
       const text = lines || "(no matches)";
       return {
