@@ -10,7 +10,7 @@ import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { shapeNode } from "./shape.js";
 import { renumberIds, resolveShortIdsInParams } from "./idmap.js";
-import { writeNodeUnion, describeNodeSchema, listNodeTypes, NODE_TYPES, type NodeType } from "./write_schema.js";
+import { writeNodeUnion, describeNodeSchema, listNodeTypes, validateEditValue, NODE_TYPES, type NodeType } from "./write_schema.js";
 
 // Define TypeScript interfaces for Figma responses
 interface FigmaResponse {
@@ -642,20 +642,35 @@ server.tool(
   },
   async ({ edits }: any) => {
     try {
-      const result: any = await sendCommandToFigma("edit_nodes", { edits });
+      // Pre-validate each edit's value against the shared field schema before the
+      // plugin round-trip — catches read-only paths and type-agnostic value/enum
+      // mistakes with a message in the agent's path grammar. Per-edit (edits are
+      // independent): a rejected edit is reported, the rest still apply.
+      const valid: any[] = [];
+      const rejected: string[] = [];
+      for (const e of edits as any[]) {
+        const msg = validateEditValue(e.path, e.new);
+        if (msg) rejected.push(`✗ ${e.nodeId} ${e.path}: ${msg}`);
+        else valid.push(e);
+      }
+
+      const result: any = valid.length ? await sendCommandToFigma("edit_nodes", { edits: valid }) : { applied: 0, total: 0, results: [] };
       const fmt = (v: any) =>
         v === null || v === undefined
           ? "(absent)"
           : typeof v === "object"
           ? JSON.stringify(v)
           : String(v);
-      const rows = (result?.results || []).map((r: any) => {
-        const id = renumberIds({ id: r.nodeId }).id;
-        return r.ok
-          ? `✓ ${id} ${r.path}: ${fmt(r.old)} → ${fmt(r.new)}`
-          : `✗ ${id} ${r.path}: ${r.error}`;
-      });
-      const text = `applied ${result?.applied || 0}/${result?.total || 0}` + (rows.length ? "\n" + rows.join("\n") : "");
+      const rows = [
+        ...rejected,
+        ...(result?.results || []).map((r: any) => {
+          const id = renumberIds({ id: r.nodeId }).id;
+          return r.ok
+            ? `✓ ${id} ${r.path}: ${fmt(r.old)} → ${fmt(r.new)}`
+            : `✗ ${id} ${r.path}: ${r.error}`;
+        }),
+      ];
+      const text = `applied ${result?.applied || 0}/${edits.length}` + (rows.length ? "\n" + rows.join("\n") : "");
       return { content: [{ type: "text", text }] };
     } catch (error) {
       return {

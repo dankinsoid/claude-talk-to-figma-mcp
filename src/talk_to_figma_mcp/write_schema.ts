@@ -119,7 +119,7 @@ const childrenField = {
 
 // Keys that are read-only or read-format-only — surfaced as a clear redirect
 // rather than silently no-opping when an agent pastes a read result into write.
-const READ_ONLY_KEYS: Record<string, string> = {
+export const READ_ONLY_KEYS: Record<string, string> = {
   style: "REST read-format; on write use fontName {family,style} + fontSize on a TEXT node",
   absoluteBoundingBox: "read-only; use x/y + width/height",
   absoluteRenderBounds: "read-only (computed)",
@@ -261,5 +261,46 @@ export function describeNodeSchema(type: NodeType): string {
 
 /** Table of contents: the node types an agent can request a schema for. */
 export function listNodeTypes(): string {
-  return "Node types (get_node_schema(type) for fields):\n  " + NODE_TYPES.join(", ");
+  return "Node types (get_write_schema(type) for fields):\n  " + NODE_TYPES.join(", ");
+}
+
+// ── edit_nodes validation (cheap subset) ─────────────────────────────────────
+//
+// edit_nodes addresses ONE field by string path on a node whose type the server
+// doesn't know without a round-trip — so it can't do write_nodes' full per-type
+// check. But two checks need no round-trip and reuse the schemas above:
+//   • read-only / read-format roots (style, absoluteBoundingBox, ...) — reject
+//     with the same redirect, so editing a read-only field fails loudly.
+//   • type-agnostic field values — opacity (0..1), cornerRadius (≥0), enums like
+//     layoutMode, colors — validated by the path's leaf name regardless of node
+//     type, since their constraint is the same on every type that has them.
+// Anything else passes (null) and the plugin handles it, preserving the
+// permissive contract.
+
+/** Type-agnostic field schemas, keyed by leaf name — the value-shape checks shared with write. */
+const FIELD_SCHEMAS: Record<string, z.ZodTypeAny> = {
+  ...baseFields, ...sizeFields, ...paintFields, ...cornerFields, ...autoLayoutFields, ...textFields,
+};
+
+/**
+ * Validate one edit_nodes `{path, new}` without reading the node. Returns an
+ * error message (in the agent's path grammar) or null to pass through.
+ */
+export function validateEditValue(path: string, value: unknown): string | null {
+  const segs = path.replace(/\[(\d+)\]/g, ".$1").split(".").filter(Boolean);
+  if (!segs.length) return null;
+  if (segs[0] in READ_ONLY_KEYS) return READ_ONLY_KEYS[segs[0]];
+
+  const endsWithIndex = /^\d+$/.test(segs[segs.length - 1]);
+  const leaf = [...segs].reverse().find((s) => !/^\d+$/.test(s));
+  if (!leaf) return null;
+
+  let schema: z.ZodTypeAny | null;
+  if (leaf === "color") schema = Color;
+  else if (leaf === "fills" || leaf === "strokes") schema = endsWithIndex ? Paint : z.array(Paint);
+  else schema = FIELD_SCHEMAS[leaf] ?? null;
+  if (!schema) return null;
+
+  const r = schema.safeParse(value);
+  return r.success ? null : r.error.issues[0]?.message ?? "invalid value";
 }

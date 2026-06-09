@@ -592,7 +592,30 @@ function describeNodeSchema(type) {
   return lines.join("\n");
 }
 function listNodeTypes() {
-  return "Node types (get_node_schema(type) for fields):\n  " + NODE_TYPES.join(", ");
+  return "Node types (get_write_schema(type) for fields):\n  " + NODE_TYPES.join(", ");
+}
+var FIELD_SCHEMAS = {
+  ...baseFields,
+  ...sizeFields,
+  ...paintFields,
+  ...cornerFields,
+  ...autoLayoutFields,
+  ...textFields
+};
+function validateEditValue(path, value) {
+  const segs = path.replace(/\[(\d+)\]/g, ".$1").split(".").filter(Boolean);
+  if (!segs.length) return null;
+  if (segs[0] in READ_ONLY_KEYS) return READ_ONLY_KEYS[segs[0]];
+  const endsWithIndex = /^\d+$/.test(segs[segs.length - 1]);
+  const leaf = [...segs].reverse().find((s) => !/^\d+$/.test(s));
+  if (!leaf) return null;
+  let schema;
+  if (leaf === "color") schema = Color;
+  else if (leaf === "fills" || leaf === "strokes") schema = endsWithIndex ? Paint : import_zod.z.array(Paint);
+  else schema = FIELD_SCHEMAS[leaf] ?? null;
+  if (!schema) return null;
+  const r = schema.safeParse(value);
+  return r.success ? null : r.error.issues[0]?.message ?? "invalid value";
 }
 
 // src/talk_to_figma_mcp/server.ts
@@ -976,13 +999,23 @@ server.tool(
   },
   async ({ edits }) => {
     try {
-      const result = await sendCommandToFigma("edit_nodes", { edits });
+      const valid = [];
+      const rejected = [];
+      for (const e of edits) {
+        const msg = validateEditValue(e.path, e.new);
+        if (msg) rejected.push(`\u2717 ${e.nodeId} ${e.path}: ${msg}`);
+        else valid.push(e);
+      }
+      const result = valid.length ? await sendCommandToFigma("edit_nodes", { edits: valid }) : { applied: 0, total: 0, results: [] };
       const fmt = (v) => v === null || v === void 0 ? "(absent)" : typeof v === "object" ? JSON.stringify(v) : String(v);
-      const rows = (result?.results || []).map((r) => {
-        const id = renumberIds({ id: r.nodeId }).id;
-        return r.ok ? `\u2713 ${id} ${r.path}: ${fmt(r.old)} \u2192 ${fmt(r.new)}` : `\u2717 ${id} ${r.path}: ${r.error}`;
-      });
-      const text = `applied ${result?.applied || 0}/${result?.total || 0}` + (rows.length ? "\n" + rows.join("\n") : "");
+      const rows = [
+        ...rejected,
+        ...(result?.results || []).map((r) => {
+          const id = renumberIds({ id: r.nodeId }).id;
+          return r.ok ? `\u2713 ${id} ${r.path}: ${fmt(r.old)} \u2192 ${fmt(r.new)}` : `\u2717 ${id} ${r.path}: ${r.error}`;
+        })
+      ];
+      const text = `applied ${result?.applied || 0}/${edits.length}` + (rows.length ? "\n" + rows.join("\n") : "");
       return { content: [{ type: "text", text }] };
     } catch (error) {
       return {
