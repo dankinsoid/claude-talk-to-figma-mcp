@@ -1744,62 +1744,6 @@ server.prompt(
     };
   }
 );
-server.tool(
-  "scan_text_nodes",
-  "Scan all text nodes in the selected Figma node",
-  {
-    nodeId: z.string().describe("ID of the node to scan"),
-    ...saveParams
-  },
-  async ({ nodeId, saveToFile, outputPath }) => {
-    try {
-      const initialStatus = {
-        type: "text",
-        text: "Starting text node scanning. This may take a moment for large designs..."
-      };
-      const result = await sendCommandToFigma("scan_text_nodes", {
-        nodeId,
-        useChunking: true,
-        // Enable chunking on the plugin side
-        chunkSize: 10
-        // Process 10 nodes at a time
-      });
-      if (result && typeof result === "object" && "chunks" in result) {
-        const typedResult = result;
-        const summaryText = `
-        Scan completed:
-        - Found ${typedResult.totalNodes} text nodes
-        - Processed in ${typedResult.chunks} chunks
-        `;
-        return {
-          content: [
-            initialStatus,
-            {
-              type: "text",
-              text: summaryText
-            },
-            await jsonContent(typedResult.textNodes, { saveToFile, outputPath }, "text-nodes")
-          ]
-        };
-      }
-      return {
-        content: [
-          initialStatus,
-          await jsonContent(result, { saveToFile, outputPath }, "text-nodes")
-        ]
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error scanning text nodes: ${error instanceof Error ? error.message : String(error)}`
-          }
-        ]
-      };
-    }
-  }
-);
 server.prompt(
   "text_replacement_strategy",
   "Systematic approach for replacing text in Figma designs",
@@ -1813,7 +1757,7 @@ server.prompt(
             text: `# Intelligent Text Replacement Strategy
 
 ## 1. Analyze Design & Identify Structure
-- Scan text nodes to understand the overall structure of the design
+- Index the text nodes to understand the overall structure of the design
 - Use AI pattern recognition to identify logical groupings:
   * Tables (rows, columns, headers, cells)
   * Lists (items, headers, nested lists)
@@ -1821,8 +1765,9 @@ server.prompt(
   * Forms (labels, input fields, validation text)
   * Navigation (menu items, breadcrumbs)
 \`\`\`
-scan_text_nodes(nodeId: "node-id")
-get_node_info(nodeId: "node-id")  // optional
+glob_nodes({ root: "node-id", type: "TEXT" })   // flat index of every text node + its @parent
+get_nodes_info({ nodeIds: [...] })               // pull full characters for the ones you'll edit
+grep_nodes({ root: "node-id", pattern: "..." })  // or find text nodes by content
 \`\`\`
 
 ## 2. Strategic Chunking for Complex Designs
@@ -2045,15 +1990,14 @@ const annotationData = await get_annotations({
 const categories = annotationData.categories;
 \`\`\`
 
-## Step 2: Scan Annotation Text Nodes
+## Step 2: Index Annotation Text Nodes
 
-Scan all text nodes to identify annotations and their descriptions:
+Index all text nodes to identify annotations and their descriptions:
 
 \`\`\`typescript
-// Get all text nodes in the selection
-const textNodes = await scan_text_nodes({
-  nodeId: selectedNodeId
-});
+// Flat index of every text node under the selection (id, name, @parent, bbox)
+const textNodes = await glob_nodes({ root: selectedNodeId, type: "TEXT" });
+// Then get_nodes_info({ nodeIds: [...] }) for the characters you need.
 
 // Filter and group annotation markers and descriptions
 

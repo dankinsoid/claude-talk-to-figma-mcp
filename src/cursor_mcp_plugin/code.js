@@ -164,6 +164,8 @@ async function handleCommand(command, params) {
       return await createFrame(params);
     case "create_text":
       return await createText(params);
+    case "edit_nodes":
+      return await editNodes(params);
     case "set_fill_color":
       return await setFillColor(params);
     case "set_stroke_color":
@@ -192,8 +194,6 @@ async function handleCommand(command, params) {
       return await setTextContent(params);
     case "clone_node":
       return await cloneNode(params);
-    case "scan_text_nodes":
-      return await scanTextNodes(params);
     case "set_multiple_text_contents":
       return await setMultipleTextContents(params);
     case "get_annotations":
@@ -1832,367 +1832,6 @@ async function cloneNode(params) {
   };
 }
 
-async function scanTextNodes(params) {
-  console.log(`Starting to scan text nodes from node ID: ${params.nodeId}`);
-  const {
-    nodeId,
-    useChunking = true,
-    chunkSize = 10,
-    commandId = generateCommandId(),
-  } = params || {};
-
-  const node = await figma.getNodeByIdAsync(nodeId);
-
-  if (!node) {
-    console.error(`Node with ID ${nodeId} not found`);
-    // Send error progress update
-    sendProgressUpdate(
-      commandId,
-      "scan_text_nodes",
-      "error",
-      0,
-      0,
-      0,
-      `Node with ID ${nodeId} not found`,
-      { error: `Node not found: ${nodeId}` }
-    );
-    throw new Error(`Node with ID ${nodeId} not found`);
-  }
-
-  // If chunking is not enabled, use the original implementation
-  if (!useChunking) {
-    const textNodes = [];
-    try {
-      // Send started progress update
-      sendProgressUpdate(
-        commandId,
-        "scan_text_nodes",
-        "started",
-        0,
-        1, // Not known yet how many nodes there are
-        0,
-        `Starting scan of node "${node.name || nodeId}" without chunking`,
-        null
-      );
-
-      await findTextNodes(node, [], 0, textNodes);
-
-      // Send completed progress update
-      sendProgressUpdate(
-        commandId,
-        "scan_text_nodes",
-        "completed",
-        100,
-        textNodes.length,
-        textNodes.length,
-        `Scan complete. Found ${textNodes.length} text nodes.`,
-        { textNodes }
-      );
-
-      return {
-        success: true,
-        message: `Scanned ${textNodes.length} text nodes.`,
-        count: textNodes.length,
-        textNodes: textNodes,
-        commandId,
-      };
-    } catch (error) {
-      console.error("Error scanning text nodes:", error);
-
-      // Send error progress update
-      sendProgressUpdate(
-        commandId,
-        "scan_text_nodes",
-        "error",
-        0,
-        0,
-        0,
-        `Error scanning text nodes: ${error.message}`,
-        { error: error.message }
-      );
-
-      throw new Error(`Error scanning text nodes: ${error.message}`);
-    }
-  }
-
-  // Chunked implementation
-  console.log(`Using chunked scanning with chunk size: ${chunkSize}`);
-
-  // First, collect all nodes to process (without processing them yet)
-  const nodesToProcess = [];
-
-  // Send started progress update
-  sendProgressUpdate(
-    commandId,
-    "scan_text_nodes",
-    "started",
-    0,
-    0, // Not known yet how many nodes there are
-    0,
-    `Starting chunked scan of node "${node.name || nodeId}"`,
-    { chunkSize }
-  );
-
-  await collectNodesToProcess(node, [], 0, nodesToProcess);
-
-  const totalNodes = nodesToProcess.length;
-  console.log(`Found ${totalNodes} total nodes to process`);
-
-  // Calculate number of chunks needed
-  const totalChunks = Math.ceil(totalNodes / chunkSize);
-  console.log(`Will process in ${totalChunks} chunks`);
-
-  // Send update after node collection
-  sendProgressUpdate(
-    commandId,
-    "scan_text_nodes",
-    "in_progress",
-    5, // 5% progress for collection phase
-    totalNodes,
-    0,
-    `Found ${totalNodes} nodes to scan. Will process in ${totalChunks} chunks.`,
-    {
-      totalNodes,
-      totalChunks,
-      chunkSize,
-    }
-  );
-
-  // Process nodes in chunks
-  const allTextNodes = [];
-  let processedNodes = 0;
-  let chunksProcessed = 0;
-
-  for (let i = 0; i < totalNodes; i += chunkSize) {
-    const chunkEnd = Math.min(i + chunkSize, totalNodes);
-    console.log(
-      `Processing chunk ${chunksProcessed + 1}/${totalChunks} (nodes ${i} to ${chunkEnd - 1
-      })`
-    );
-
-    // Send update before processing chunk
-    sendProgressUpdate(
-      commandId,
-      "scan_text_nodes",
-      "in_progress",
-      Math.round(5 + (chunksProcessed / totalChunks) * 90), // 5-95% for processing
-      totalNodes,
-      processedNodes,
-      `Processing chunk ${chunksProcessed + 1}/${totalChunks}`,
-      {
-        currentChunk: chunksProcessed + 1,
-        totalChunks,
-        textNodesFound: allTextNodes.length,
-      }
-    );
-
-    const chunkNodes = nodesToProcess.slice(i, chunkEnd);
-    const chunkTextNodes = [];
-
-    // Process each node in this chunk
-    for (const nodeInfo of chunkNodes) {
-      if (nodeInfo.node.type === "TEXT") {
-        try {
-          const textNodeInfo = await processTextNode(
-            nodeInfo.node,
-            nodeInfo.parentPath,
-            nodeInfo.depth
-          );
-          if (textNodeInfo) {
-            chunkTextNodes.push(textNodeInfo);
-          }
-        } catch (error) {
-          console.error(`Error processing text node: ${error.message}`);
-          // Continue with other nodes
-        }
-      }
-
-      // Brief delay to allow UI updates and prevent freezing
-      await delay(5);
-    }
-
-    // Add results from this chunk
-    allTextNodes.push(...chunkTextNodes);
-    processedNodes += chunkNodes.length;
-    chunksProcessed++;
-
-    // Send update after processing chunk
-    sendProgressUpdate(
-      commandId,
-      "scan_text_nodes",
-      "in_progress",
-      Math.round(5 + (chunksProcessed / totalChunks) * 90), // 5-95% for processing
-      totalNodes,
-      processedNodes,
-      `Processed chunk ${chunksProcessed}/${totalChunks}. Found ${allTextNodes.length} text nodes so far.`,
-      {
-        currentChunk: chunksProcessed,
-        totalChunks,
-        processedNodes,
-        textNodesFound: allTextNodes.length,
-        chunkResult: chunkTextNodes,
-      }
-    );
-
-    // Small delay between chunks to prevent UI freezing
-    if (i + chunkSize < totalNodes) {
-      await delay(50);
-    }
-  }
-
-  // Send completed progress update
-  sendProgressUpdate(
-    commandId,
-    "scan_text_nodes",
-    "completed",
-    100,
-    totalNodes,
-    processedNodes,
-    `Scan complete. Found ${allTextNodes.length} text nodes.`,
-    {
-      textNodes: allTextNodes,
-      processedNodes,
-      chunks: chunksProcessed,
-    }
-  );
-
-  return {
-    success: true,
-    message: `Chunked scan complete. Found ${allTextNodes.length} text nodes.`,
-    totalNodes: allTextNodes.length,
-    processedNodes: processedNodes,
-    chunks: chunksProcessed,
-    textNodes: allTextNodes,
-    commandId,
-  };
-}
-
-// Helper function to collect all nodes that need to be processed
-async function collectNodesToProcess(
-  node,
-  parentPath = [],
-  depth = 0,
-  nodesToProcess = []
-) {
-  // Skip invisible nodes
-  if (node.visible === false) return;
-
-  // Get the path to this node
-  const nodePath = [...parentPath, node.name || `Unnamed ${node.type}`];
-
-  // Add this node to the processing list
-  nodesToProcess.push({
-    node: node,
-    parentPath: nodePath,
-    depth: depth,
-  });
-
-  // Recursively add children
-  if ("children" in node) {
-    for (const child of node.children) {
-      await collectNodesToProcess(child, nodePath, depth + 1, nodesToProcess);
-    }
-  }
-}
-
-// Process a single text node
-async function processTextNode(node, parentPath, depth) {
-  if (node.type !== "TEXT") return null;
-
-  try {
-    // Safely extract font information
-    let fontFamily = "";
-    let fontStyle = "";
-
-    if (node.fontName) {
-      if (typeof node.fontName === "object") {
-        if ("family" in node.fontName) fontFamily = node.fontName.family;
-        if ("style" in node.fontName) fontStyle = node.fontName.style;
-      }
-    }
-
-    // Create a safe representation of the text node
-    const safeTextNode = {
-      id: node.id,
-      name: node.name || "Text",
-      type: node.type,
-      characters: node.characters,
-      fontSize: typeof node.fontSize === "number" ? node.fontSize : 0,
-      fontFamily: fontFamily,
-      fontStyle: fontStyle,
-      x: typeof node.x === "number" ? node.x : 0,
-      y: typeof node.y === "number" ? node.y : 0,
-      width: typeof node.width === "number" ? node.width : 0,
-      height: typeof node.height === "number" ? node.height : 0,
-      path: parentPath.join(" > "),
-      depth: depth,
-    };
-
-    return safeTextNode;
-  } catch (nodeErr) {
-    console.error("Error processing text node:", nodeErr);
-    return null;
-  }
-}
-
-// A delay function that returns a promise
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// Keep the original findTextNodes for backward compatibility
-async function findTextNodes(node, parentPath = [], depth = 0, textNodes = []) {
-  // Skip invisible nodes
-  if (node.visible === false) return;
-
-  // Get the path to this node including its name
-  const nodePath = [...parentPath, node.name || `Unnamed ${node.type}`];
-
-  if (node.type === "TEXT") {
-    try {
-      // Safely extract font information to avoid Symbol serialization issues
-      let fontFamily = "";
-      let fontStyle = "";
-
-      if (node.fontName) {
-        if (typeof node.fontName === "object") {
-          if ("family" in node.fontName) fontFamily = node.fontName.family;
-          if ("style" in node.fontName) fontStyle = node.fontName.style;
-        }
-      }
-
-      // Create a safe representation of the text node with only serializable properties
-      const safeTextNode = {
-        id: node.id,
-        name: node.name || "Text",
-        type: node.type,
-        characters: node.characters,
-        fontSize: typeof node.fontSize === "number" ? node.fontSize : 0,
-        fontFamily: fontFamily,
-        fontStyle: fontStyle,
-        x: typeof node.x === "number" ? node.x : 0,
-        y: typeof node.y === "number" ? node.y : 0,
-        width: typeof node.width === "number" ? node.width : 0,
-        height: typeof node.height === "number" ? node.height : 0,
-        path: nodePath.join(" > "),
-        depth: depth,
-      };
-
-      textNodes.push(safeTextNode);
-    } catch (nodeErr) {
-      console.error("Error processing text node:", nodeErr);
-      // Skip this node but continue with others
-    }
-  }
-
-  // Recursively process children of container nodes
-  if ("children" in node) {
-    for (const child of node.children) {
-      await findTextNodes(child, nodePath, depth + 1, textNodes);
-    }
-  }
-}
-
 // Replace text in a specific node
 async function setMultipleTextContents(params) {
   const { nodeId, text } = params || {};
@@ -3091,6 +2730,180 @@ function globToRegExp(glob) {
     else re += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
   return new RegExp("^" + re + "$", "i");
+}
+
+// ---------------------------------------------------------------------------
+// edit_nodes — generic, path-addressed property writer (write-side twin of
+// query_nodes). Each edit is {nodeId, path, old?, new}: `path` uses the same
+// field-path syntax as query_nodes (dot for objects, [i] for an index; no [*]),
+// `old` is an optional Edit-style guard checked against the current value, and
+// `new` is the value to write. Edits apply in order and are independent — one
+// failing (guard mismatch, read-only prop, Figma rejecting the write) records
+// its error and the rest still run, so the agent learns exactly what went wrong.
+// ---------------------------------------------------------------------------
+async function editNodes(params) {
+  const { edits } = params || {};
+  if (!Array.isArray(edits) || edits.length === 0) {
+    throw new Error("edit_nodes requires a non-empty `edits` array");
+  }
+
+  const nodeCache = new Map();
+  const results = [];
+  let applied = 0;
+
+  for (let i = 0; i < edits.length; i++) {
+    const e = edits[i] || {};
+    const r = { nodeId: e.nodeId, path: e.path };
+    try {
+      if (!e.nodeId) throw new Error("edit needs a `nodeId`");
+      if (!e.path || typeof e.path !== "string") throw new Error("edit needs a string `path`");
+      if (!("new" in e)) throw new Error("edit needs a `new` value");
+
+      let node = nodeCache.get(e.nodeId);
+      if (node === undefined) {
+        node = (await figma.getNodeByIdAsync(e.nodeId)) || null;
+        nodeCache.set(e.nodeId, node);
+      }
+      if (!node) throw new Error(`node not found: ${e.nodeId}`);
+
+      const steps = parseFieldPath(e.path);
+      if (!steps.length) throw new Error(`could not parse path "${e.path}"`);
+      if (steps.some((s) => s.wild)) {
+        throw new Error(`path "${e.path}" uses [*]; edit needs a concrete index`);
+      }
+
+      const before = resolveFieldPath(node, steps);
+      const present = before.length > 0;
+      const beforeVal = present ? before[0] : undefined;
+
+      // Edit-style guard: refuse to write if the current value isn't what the
+      // agent thinks it is — catches stale reads and wrong-node mistakes.
+      if ("old" in e && e.old !== undefined) {
+        if (!present) {
+          throw new Error(`old mismatch at "${e.path}": expected ${JSON.stringify(e.old)}, but path is absent`);
+        }
+        if (!leafEquals(beforeVal, e.old)) {
+          throw new Error(
+            `old mismatch at "${e.path}": expected ${JSON.stringify(e.old)}, found ${JSON.stringify(normalizeForDisplay(beforeVal))}`
+          );
+        }
+      }
+
+      const newVal = await applyEditToNode(node, steps, e.new, present ? beforeVal : undefined, e.path);
+      r.name = node.name;
+      r.type = node.type;
+      r.old = present ? normalizeForDisplay(beforeVal) : null;
+      r.new = newVal;
+      r.ok = true;
+      applied++;
+    } catch (err) {
+      r.ok = false;
+      r.error = err && err.message ? err.message : String(err);
+    }
+    results.push(r);
+  }
+
+  return { applied, total: edits.length, results };
+}
+
+/**
+ * Write `newValue` at a parsed path on a node, returning the value read back.
+ * Figma node properties are immutable references, so a nested write (e.g.
+ * fills[0].color) clones the whole top-level property, edits the clone, then
+ * reassigns it. A handful of props (width/height, characters) are exposed only
+ * through methods rather than assignment and are routed accordingly.
+ */
+async function applyEditToNode(node, steps, newValue, oldLeaf, path) {
+  const top = steps[0];
+  if (top.index != null || top.wild) throw new Error(`path "${path}" must start with a property name`);
+  const topKey = top.key;
+
+  if (steps.length === 1) {
+    if (topKey === "characters") {
+      if (node.type !== "TEXT") throw new Error(`characters can only be set on TEXT nodes, not ${node.type}`);
+      await figma.loadFontAsync(node.fontName); // throws on mixed fonts — surfaced to the agent
+      await setCharacters(node, String(newValue));
+      return node.characters;
+    }
+    if (topKey === "width" || topKey === "height") {
+      if (!("resize" in node)) throw new Error(`${node.type} does not support resizing`);
+      const w = topKey === "width" ? Number(newValue) : node.width;
+      const h = topKey === "height" ? Number(newValue) : node.height;
+      node.resize(w, h);
+      return node[topKey];
+    }
+    node[topKey] = convertWriteValue(newValue, oldLeaf, topKey);
+    return normalizeForDisplay(resolveFieldPath(node, steps)[0]);
+  }
+
+  const topVal = node[topKey];
+  if (topVal === undefined) throw new Error(`property "${topKey}" is not present on this node`);
+  if (topVal === figma.mixed) throw new Error(`property "${topKey}" is mixed; cannot edit a nested field`);
+  let clone;
+  try {
+    clone = JSON.parse(JSON.stringify(topVal));
+  } catch (e) {
+    throw new Error(`property "${topKey}" cannot be cloned for editing`);
+  }
+
+  let cur = clone;
+  for (let i = 1; i < steps.length - 1; i++) {
+    const s = steps[i];
+    const k = s.index != null ? s.index : s.key;
+    if (cur == null || typeof cur !== "object") throw new Error(`path "${path}" is not an object before "${k}"`);
+    cur = cur[k];
+    if (cur === undefined) throw new Error(`path "${path}" segment "${k}" is absent`);
+  }
+  const last = steps[steps.length - 1];
+  const leafKey = last.index != null ? last.index : last.key;
+  if (cur == null || typeof cur !== "object") throw new Error(`path "${path}" parent of the leaf is not editable`);
+  cur[leafKey] = convertWriteValue(newValue, oldLeaf, last.key);
+
+  node[topKey] = clone;
+  return normalizeForDisplay(resolveFieldPath(node, steps)[0]);
+}
+
+/** Coerce a hex string into a Figma rgb 0-1 color when the target leaf is a color; otherwise pass through. */
+function convertWriteValue(newValue, oldLeaf, key) {
+  if (typeof newValue === "string" && /^#[0-9a-fA-F]{3,8}$/.test(newValue)) {
+    const colorLike = key === "color" || (oldLeaf && typeof oldLeaf === "object" && typeof oldLeaf.r === "number");
+    if (colorLike) {
+      const rgb = hexToRgb01(newValue);
+      if (!rgb) throw new Error(`invalid hex color "${newValue}"`);
+      if (oldLeaf && typeof oldLeaf.a === "number") rgb.a = oldLeaf.a; // keep existing alpha channel
+      return rgb;
+    }
+  }
+  return newValue;
+}
+
+/** Present a raw leaf the way the agent reads it elsewhere: colors as hex, figma.mixed as "mixed". */
+function normalizeForDisplay(v) {
+  if (v === figma.mixed) return "mixed";
+  if (v && typeof v === "object" && typeof v.r === "number" && typeof v.g === "number" && typeof v.b === "number") {
+    return rgbaToHex(v);
+  }
+  return v;
+}
+
+/** Compare a raw current leaf against an agent-supplied `old`, tolerant of color/number formatting. */
+function leafEquals(currentRaw, old) {
+  const cur = normalizeForDisplay(currentRaw);
+  if (typeof cur === "string" && typeof old === "string") {
+    if (cur[0] === "#" || old[0] === "#") return hexNorm(cur) === hexNorm(old);
+    return cur === old;
+  }
+  if (typeof cur === "number" && typeof old === "number") return Math.abs(cur - old) < 1e-4;
+  if (typeof cur === "number" && typeof old === "string") return Math.abs(cur - Number(old)) < 1e-4;
+  return JSON.stringify(cur) === JSON.stringify(old);
+}
+
+/** Normalize a hex string for comparison: lowercase, expand shorthand, drop an opaque alpha. */
+function hexNorm(s) {
+  let h = String(s).toLowerCase().replace(/^#/, "");
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  if (h.length === 8 && h.endsWith("ff")) h = h.slice(0, 6);
+  return h;
 }
 
 // Set multiple annotations with async progress updates

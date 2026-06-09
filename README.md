@@ -142,6 +142,8 @@ The MCP server provides the following tools for interacting with Figma:
 - `set_annotation` - Create or update an annotation with markdown support
 - `set_multiple_annotations` - Batch create/update multiple annotations efficiently
 - `glob_nodes` - Flat type/name-glob index of a subtree, one node per line as `id:"name".TYPE @parent` (the filesystem-glob analog; useful for finding annotation targets)
+- `grep_nodes` - Regex search over the text content of a subtree, line-oriented (the grep analog); reports matching lines as `id:"name".TEXT @parent L<n>: <line>`
+- `query_nodes` - Structural search by field predicates (`{path, op, value}`, AND-combined) — match on any node-model field (fontSize, fills color, bound variables, etc.), including key presence via `exists`/`absent`
 
 ### Prototyping & Connections
 
@@ -157,7 +159,6 @@ The MCP server provides the following tools for interacting with Figma:
 
 ### Modifying text content
 
-- `scan_text_nodes` - Scan text nodes with intelligent chunking for large designs
 - `set_text_content` - Set the text content of a single text node
 - `set_multiple_text_contents` - Batch update multiple text nodes efficiently
 
@@ -237,7 +238,7 @@ When working with the Figma MCP:
 6. Use component instances when possible for consistency
 7. Handle errors appropriately as all commands can throw exceptions
 8. For large designs:
-   - Use chunking parameters in `scan_text_nodes`
+   - Narrow searches with `root`/`depth`/`within` and cap results with `maxMatches` in `glob_nodes`/`grep_nodes`/`query_nodes`
    - Monitor progress through WebSocket updates
    - Implement appropriate error handling
 9. For text operations:
