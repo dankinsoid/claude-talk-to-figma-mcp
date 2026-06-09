@@ -151,13 +151,6 @@ async function handleCommand(command, params) {
         throw new Error("Missing nodeId parameter");
       }
       return await getNodeInfoRaw(params.nodeId);
-    case "get_nodes_info":
-      if (!params || !params.nodeIds || !Array.isArray(params.nodeIds)) {
-        throw new Error("Missing or invalid nodeIds parameter");
-      }
-      return await getNodesInfo(params.nodeIds);
-    case "read_my_design":
-      return await readMyDesign();
     case "create_rectangle":
       return await createRectangle(params);
     case "create_frame":
@@ -508,34 +501,6 @@ async function getNodeInfoRaw(nodeId) {
   return document;
 }
 
-async function getNodesInfo(nodeIds) {
-  try {
-    // Load all nodes in parallel
-    const nodes = await Promise.all(
-      nodeIds.map((id) => figma.getNodeByIdAsync(id))
-    );
-
-    // Filter out any null values (nodes that weren't found)
-    const validNodes = nodes.filter((node) => node !== null);
-
-    // Export all valid nodes in parallel
-    const responses = await Promise.all(
-      validNodes.map(async (node) => {
-        const response = await node.exportAsync({
-          format: "JSON_REST_V1",
-        });
-        return {
-          nodeId: node.id,
-          document: filterFigmaNode(response.document),
-        };
-      })
-    );
-
-    return responses;
-  } catch (error) {
-    throw new Error(`Error getting nodes info: ${error.message}`);
-  }
-}
 
 async function getReactions(nodeIds) {
   try {
@@ -686,35 +651,6 @@ async function getReactions(nodeIds) {
     };
   } catch (error) {
     throw new Error(`Failed to get reactions: ${error.message}`);
-  }
-}
-
-async function readMyDesign() {
-  try {
-    // Load all selected nodes in parallel
-    const nodes = await Promise.all(
-      figma.currentPage.selection.map((node) => figma.getNodeByIdAsync(node.id))
-    );
-
-    // Filter out any null values (nodes that weren't found)
-    const validNodes = nodes.filter((node) => node !== null);
-
-    // Export all valid nodes in parallel
-    const responses = await Promise.all(
-      validNodes.map(async (node) => {
-        const response = await node.exportAsync({
-          format: "JSON_REST_V1",
-        });
-        return {
-          nodeId: node.id,
-          document: filterFigmaNode(response.document),
-        };
-      })
-    );
-
-    return responses;
-  } catch (error) {
-    throw new Error(`Error getting nodes info: ${error.message}`);
   }
 }
 

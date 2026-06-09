@@ -258,92 +258,66 @@ type ShapeArgs = {
   cull?: boolean;
 };
 
-// Read My Design Tool
+// Read Node Tool — the Read tool for the canvas. Variadic; reads the selection
+// when no ids are given. Compact subtree by default, full node props with raw.
 server.tool(
-  "read_my_design",
-  "Get information about the current selection in Figma, compacted for low token cost. Same depth/collapse controls as get_node_info.",
+  "read_node",
+  "Read Figma nodes — the Read tool for the canvas. Pass `nodeIds` (one or many); omit it to read the current selection. Returns one entry per node. Default (compact) gives each node's subtree in a minimal, low-token field set (id, name, type, color/gradient, opacity, box or autoLayout, text); children expand to `depth` levels and deeper nodes become {childCount, more:true} stubs — re-request a stub's id or raise depth to zoom in. Set `raw:true` for the full, unfiltered JSON_REST_V1 of each node with ALL properties but the children array stripped (use when the compact view drops a field you need); in raw mode depth/collapse/cull are ignored — raw is always one node, all props, no children. Large outputs auto-spill to a file. Node ids are short counters (n0, n1, ...) standing in for canonical Figma ids — pass them to any tool. Locate ids with glob_nodes/grep_nodes first, then read_node to inspect properties.",
   {
+    nodeIds: z
+      .array(z.string())
+      .optional()
+      .describe("Node ids to read (short n0,... or canonical). Omit to read the current selection."),
+    raw: z
+      .boolean()
+      .optional()
+      .describe("Return each node's full unfiltered props (children stripped) instead of the compact subtree. Ignores depth/collapse/cull. Default false."),
     ...shapeParams,
     ...saveParams,
   },
-  async ({ depth, collapseIcons, collapseRepeats, cull, saveToFile, outputPath }: any) => {
+  async ({ nodeIds, raw, depth, collapseIcons, collapseRepeats, cull, saveToFile, outputPath }: any) => {
     try {
+      // Resolve targets: explicit ids, else fall back to the current selection.
+      let ids: string[] = Array.isArray(nodeIds) ? nodeIds : [];
+      if (ids.length === 0) {
+        const sel: any = await sendCommandToFigma("get_selection");
+        ids = (sel?.selection ?? []).map((n: any) => n.id);
+      }
+      if (ids.length === 0) {
+        return {
+          content: [{ type: "text", text: "No nodes to read: no nodeIds given and the selection is empty." }],
+        };
+      }
+
+      if (raw) {
+        // Raw keeps canonical Figma ids untouched; echo the requested id so the
+        // agent sees the short->canonical mapping instead of an unexplained swap.
+        const nodes = await Promise.all(
+          ids.map(async (nodeId) => ({
+            requestedId: nodeId,
+            node: await sendCommandToFigma("get_node_info_raw", { nodeId }),
+          }))
+        );
+        return {
+          content: [await jsonContent(nodes, { saveToFile, outputPath }, "node-raw")],
+        };
+      }
+
       const opts: ShapeArgs = { depth, collapseIcons, collapseRepeats, cull };
-      const result = await sendCommandToFigma("read_my_design", {});
-      const shaped = Array.isArray(result)
-        ? result.map((r: any) => (r && r.document ? { ...r, document: renumberIds(shapeNode(r.document, opts)) } : r))
-        : result;
+      const infos = await Promise.all(
+        ids.map((nodeId) => sendCommandToFigma("get_node_info", { nodeId }))
+      );
+      // Renumber across the whole batch so short ids share one counter space.
+      const shaped = renumberIds(infos.map((info) => shapeNode(info, opts)));
       return {
-        content: [await jsonContent(shaped, { saveToFile, outputPath }, "my-design")]
+        content: [await jsonContent(shaped, { saveToFile, outputPath }, "node-info")],
       };
     } catch (error) {
       return {
         content: [
           {
             type: "text",
-            text: `Error getting node info: ${error instanceof Error ? error.message : String(error)
-              }`,
-          },
-        ],
-      };
-    }
-  }
-);
-
-// Node Info Tool
-server.tool(
-  "get_node_info",
-  "Get information about a specific node in Figma, compacted for low token cost. Returns a fixed minimal field set per node (id, name, type, color/gradient, opacity, box or autoLayout, text); children expand to depth 6 by default — raise depth or re-request a stub's id to zoom in. Node ids are short counters (n0, n1, ...) standing in for canonical Figma ids; pass them to any tool (read, edit, or get_node_info_raw).",
-  {
-    nodeId: z.string().describe("The ID of the node to get information about"),
-    ...shapeParams,
-    ...saveParams,
-  },
-  async ({ nodeId, depth, collapseIcons, collapseRepeats, cull, saveToFile, outputPath }: any) => {
-    try {
-      const result = await sendCommandToFigma("get_node_info", { nodeId });
-      const shaped = renumberIds(shapeNode(result, { depth, collapseIcons, collapseRepeats, cull }));
-      return {
-        content: [await jsonContent(shaped, { saveToFile, outputPath }, "node-info")]
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error getting node info: ${error instanceof Error ? error.message : String(error)
-              }`,
-          },
-        ],
-      };
-    }
-  }
-);
-
-// Raw Node Info Tool
-server.tool(
-  "get_node_info_raw",
-  "Get the full, unfiltered JSON of a single node exactly as Figma serializes it (JSON_REST_V1), with all properties but with the children array stripped. Use when get_node_info's compacted view drops a property you need; large outputs auto-spill to a file. Accepts the short ids (n0, n1, ...) from compact output. Returns {requestedId, node}: requestedId echoes the id you passed, node carries the raw JSON with canonical Figma ids.",
-  {
-    nodeId: z.string().describe("The ID of the node to get the raw JSON for"),
-    ...saveParams,
-  },
-  async ({ nodeId, saveToFile, outputPath }: any) => {
-    try {
-      // sendCommandToFigma resolves a short id (n5) to the canonical id; the raw
-      // node keeps its real Figma ids untouched. Echo the requested id so the
-      // agent sees the short->canonical mapping instead of an unexplained swap.
-      const result = await sendCommandToFigma("get_node_info_raw", { nodeId });
-      const wrapped = { requestedId: nodeId, node: result };
-      return {
-        content: [await jsonContent(wrapped, { saveToFile, outputPath }, "node-info-raw")]
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error getting raw node info: ${error instanceof Error ? error.message : String(error)
+            text: `Error reading node(s): ${error instanceof Error ? error.message : String(error)
               }`,
           },
         ],
@@ -355,7 +329,7 @@ server.tool(
 // Glob Tool — flat, grep-friendly index of a subtree
 server.tool(
   "glob_nodes",
-  "List nodes under a root by type and/or name glob, one per line as `id:\"name\".TYPE @parent [x,y wxh]` — a flat, grep-friendly index of a subtree (the Figma analog of glob / `ls -R`). The `@parent` is the immediate container's short id (location without drawing the tree; pass it to get_node_info to see surroundings). The trailing `[x,y wxh]` is the node's ABSOLUTE bounding box (omitted with `bbox:false`, or when a node has no geometry). Filters: `type` (a node type, an array, or \"*\"/omit for any); `name` (a shell-style glob over the node's OWN name: `*` = any run, `?` = one char; omit for any — matches names only, not paths, since Figma names contain slashes); and `within` (an absolute rect — keep only nodes intersecting it, e.g. to glob a region; get its coords from a prior bbox). `root` is the node id to search under (default: current page); descends through every container regardless of match (any-depth search), with `depth` capping how deep. Ids (including `@parent`) are short counters (n0, n1, ...) — feed any straight into read/edit tools.",
+  "List nodes under a root by type and/or name glob, one per line as `id:\"name\".TYPE @parent [x,y wxh]` — a flat, grep-friendly index of a subtree (the Figma analog of glob / `ls -R`). The `@parent` is the immediate container's short id (location without drawing the tree; pass it to read_node to see surroundings). The trailing `[x,y wxh]` is the node's ABSOLUTE bounding box (omitted with `bbox:false`, or when a node has no geometry). Filters: `type` (a node type, an array, or \"*\"/omit for any); `name` (a shell-style glob over the node's OWN name: `*` = any run, `?` = one char; omit for any — matches names only, not paths, since Figma names contain slashes); and `within` (an absolute rect — keep only nodes intersecting it, e.g. to glob a region; get its coords from a prior bbox). `root` is the node id to search under (default: current page); descends through every container regardless of match (any-depth search), with `depth` capping how deep. Ids (including `@parent`) are short counters (n0, n1, ...) — feed any straight into read/edit tools.",
   {
     root: z
       .string()
@@ -618,7 +592,7 @@ server.tool(
 
 server.tool(
   "edit_nodes",
-  "Edit node properties directly in the node model — the write-side twin of query_nodes/get_node_info, an Edit tool for Figma JSON instead of text. Pass `edits`: an array of `{nodeId, path, old?, new}`. `path` addresses one field the same way query_nodes does — dot for objects, `[i]` for an array index (e.g. `name`, `cornerRadius`, `fills[0].color`, `fills[0].opacity`); no `[*]` (a write needs one concrete target). `new` is the value to set: colors as `#RRGGBB` are converted to Figma's rgb 0-1, and whole objects/arrays are allowed (e.g. set `fills[0]` to a full paint). `old` is an OPTIONAL guard, exactly like the old_string in Edit — if given and it doesn't match the current value (colors compared as hex, numbers tolerantly), that one edit is rejected so you never blind-overwrite a stale read. Edits run in order and are INDEPENDENT: one failing — guard mismatch, read-only/derived prop, a type Figma rejects, font not loaded — records its Figma error and the rest still apply. The result lists each edit as `✓ id path: old → new` or `✗ id path: <error>`, so a failure tells you exactly what to fix. One call can touch many nodes (each edit names its own `nodeId`) — this is also how you bulk-replace text across components: one `{nodeId, path:\"characters\", new:\"...\"}` per text node in a single call (the `characters` path loads the node's font for you). Large batches stream progress, so a long run won't time out. Common paths: `name`, `characters`, `x`/`y`, `width`/`height` (resize), `cornerRadius`, `fills[0].color` (#RRGGBB), `opacity`, `layoutMode`, `paddingTop`, `itemSpacing`, `primaryAxisAlignItems`, `layoutSizingHorizontal`. nodeId accepts short ids (n0, ...) or full Figma ids.",
+  "Edit node properties directly in the node model — the write-side twin of query_nodes/read_node, an Edit tool for Figma JSON instead of text. Pass `edits`: an array of `{nodeId, path, old?, new}`. `path` addresses one field the same way query_nodes does — dot for objects, `[i]` for an array index (e.g. `name`, `cornerRadius`, `fills[0].color`, `fills[0].opacity`); no `[*]` (a write needs one concrete target). `new` is the value to set: colors as `#RRGGBB` are converted to Figma's rgb 0-1, and whole objects/arrays are allowed (e.g. set `fills[0]` to a full paint). `old` is an OPTIONAL guard, exactly like the old_string in Edit — if given and it doesn't match the current value (colors compared as hex, numbers tolerantly), that one edit is rejected so you never blind-overwrite a stale read. Edits run in order and are INDEPENDENT: one failing — guard mismatch, read-only/derived prop, a type Figma rejects, font not loaded — records its Figma error and the rest still apply. The result lists each edit as `✓ id path: old → new` or `✗ id path: <error>`, so a failure tells you exactly what to fix. One call can touch many nodes (each edit names its own `nodeId`) — this is also how you bulk-replace text across components: one `{nodeId, path:\"characters\", new:\"...\"}` per text node in a single call (the `characters` path loads the node's font for you). Large batches stream progress, so a long run won't time out. Common paths: `name`, `characters`, `x`/`y`, `width`/`height` (resize), `cornerRadius`, `fills[0].color` (#RRGGBB), `opacity`, `layoutMode`, `paddingTop`, `itemSpacing`, `primaryAxisAlignItems`, `layoutSizingHorizontal`. nodeId accepts short ids (n0, ...) or full Figma ids.",
   {
     edits: z
       .array(
@@ -773,43 +747,6 @@ function filterFigmaNode(node: any) {
 
   return filtered;
 }
-
-// Nodes Info Tool
-server.tool(
-  "get_nodes_info",
-  "Get information about multiple nodes in Figma, compacted for low token cost. Same depth/collapse controls as get_node_info.",
-  {
-    nodeIds: z.array(z.string()).describe("Array of node IDs to get information about"),
-    ...shapeParams,
-    ...saveParams,
-  },
-  async ({ nodeIds, depth, collapseIcons, collapseRepeats, cull, saveToFile, outputPath }: any) => {
-    try {
-      const opts: ShapeArgs = { depth, collapseIcons, collapseRepeats, cull };
-      const results = await Promise.all(
-        nodeIds.map(async (nodeId: any) => {
-          const result = await sendCommandToFigma('get_node_info', { nodeId });
-          return { nodeId, info: result };
-        })
-      );
-      const shaped = renumberIds(results.map((result) => shapeNode(result.info, opts)));
-      return {
-        content: [await jsonContent(shaped, { saveToFile, outputPath }, "nodes-info")]
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error getting nodes info: ${error instanceof Error ? error.message : String(error)
-              }`,
-          },
-        ],
-      };
-    }
-  }
-);
-
 
 // Create Rectangle Tool
 server.tool(
@@ -1729,7 +1666,7 @@ server.prompt(
      * Smaller for helper text/links
 
 8. Best Practices:
-   - Verify each creation with get_node_info()
+   - Verify each creation with read_node()
    - Use parentId to maintain proper hierarchy
    - Group related elements together in frames
    - Keep consistent spacing and alignment
@@ -1772,7 +1709,7 @@ server.prompt(
             text: `When reading Figma designs, follow these best practices:
 
 1. Start with selection:
-   - First use read_my_design() to understand the current selection
+   - First use read_node() (no nodeIds → current selection) to understand the current selection
    - If no selection ask user to select single or multiple nodes
 `,
           },
@@ -1806,7 +1743,7 @@ server.prompt(
   * Navigation (menu items, breadcrumbs)
 \`\`\`
 glob_nodes({ root: "node-id", type: "TEXT" })   // flat index of every text node + its @parent
-get_nodes_info({ nodeIds: [...] })               // pull full characters for the ones you'll edit
+read_node({ nodeIds: [...] })                    // pull full characters for the ones you'll edit
 grep_nodes({ root: "node-id", pattern: "..." })  // or find text nodes by content
 \`\`\`
 
@@ -1964,7 +1901,7 @@ Index all text nodes to identify annotations and their descriptions:
 \`\`\`typescript
 // Flat index of every text node under the selection (id, name, @parent, bbox)
 const textNodes = await glob_nodes({ root: selectedNodeId, type: "TEXT" });
-// Then get_nodes_info({ nodeIds: [...] }) for the characters you need.
+// Then read_node({ nodeIds: [...] }) for the characters you need.
 
 // Filter and group annotation markers and descriptions
 
@@ -2114,7 +2051,7 @@ This strategy enables transferring content and property overrides from a source 
   \`\`\`
 
 ### 4. Verification
-- Verify results with \`get_node_info()\` or \`read_my_design()\`
+- Verify results with \`read_node()\` (pass nodeIds, or omit for the current selection)
 - Confirm text content and style overrides have transferred successfully
 
 ## Key Tips
@@ -2347,7 +2284,7 @@ You will receive JSON data from the \`get_reactions\` tool. This data contains a
 ## Step-by-Step Process
 
 ### 1. Preparation & Context Gathering
-   - **Action:** Call \`read_my_design\` on the relevant node(s) to get context about the nodes involved (names, types, etc.). This helps in generating meaningful connector labels later.
+   - **Action:** Call \`read_node\` on the relevant node(s) — pass their nodeIds, or omit nodeIds to read the current selection — to get context about the nodes involved (names, types, etc.). This helps in generating meaningful connector labels later.
    - **Action:** Call \`set_default_connector\` **without** the \`connectorId\` parameter.
    - **Check Result:** Analyze the response from \`set_default_connector\`.
      - If it confirms a default connector is already set (e.g., "Default connector is already set"), proceed to Step 2.
@@ -2367,7 +2304,7 @@ You will receive JSON data from the \`get_reactions\` tool. This data contains a
 
 ### 3. Generate Connector Text Labels
    - **For each extracted connection:** Create a concise, descriptive text label string.
-   - **Combine Information:** Use the \`actionType\`, \`triggerType\`, and potentially the names of the source/destination nodes (obtained from Step 1's \`read_my_design\` or by calling \`get_node_info\` if necessary) to generate the label.
+   - **Combine Information:** Use the \`actionType\`, \`triggerType\`, and potentially the names of the source/destination nodes (obtained from Step 1's \`read_node\` call if necessary) to generate the label.
    - **Example Labels:**
      - If \`triggerType\` is "ON\_CLICK" and \`actionType\` is "NAVIGATE": "On click, navigate to [Destination Node Name]"
      - If \`triggerType\` is "ON\_DRAG" and \`actionType\` is "OPEN\_OVERLAY": "On drag, open [Destination Node Name] overlay"
@@ -2405,8 +2342,6 @@ type FigmaCommand =
   | "get_selection"
   | "get_node_info"
   | "get_node_info_raw"
-  | "get_nodes_info"
-  | "read_my_design"
   | "create_rectangle"
   | "create_frame"
   | "create_text"
@@ -2440,7 +2375,6 @@ type CommandParams = {
   get_selection: Record<string, never>;
   get_node_info: { nodeId: string };
   get_node_info_raw: { nodeId: string };
-  get_nodes_info: { nodeIds: string[] };
   create_rectangle: {
     x: number;
     y: number;
