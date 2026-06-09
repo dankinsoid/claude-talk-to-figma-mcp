@@ -1,0 +1,2278 @@
+{
+  "id": "9496:154362",
+  "name": "Adding to Spotify only 27 left_375",
+  "type": "frame",
+  "box": [
+    4962,
+    9320,
+    375,
+    812
+  ],
+  "children": [
+    {
+      "id": "9496:154363",
+      "name": "Main_375",
+      "type": "instance",
+      "color": "#000000",
+      "box": [
+        0,
+        0,
+        375,
+        812
+      ],
+      "children": [
+        {
+          "id": "I9496:154363;3063:34762",
+          "name": "StreamsBoard",
+          "type": "instance",
+          "box": [
+            0,
+            156,
+            375,
+            656
+          ],
+          "autoLayout": [
+            {
+              "alignment": "center",
+              "flow": "vertical",
+              "gap": 8
+            }
+          ],
+          "children": [
+            {
+              "id": "I9496:154363;3063:34762;3063:42606",
+              "name": "content",
+              "type": "frame",
+              "color": "#121212",
+              "autoLayout": [
+                {
+                  "alignment": "center",
+                  "flow": "vertical",
+                  "gap": 32,
+                  "padding": [
+                    16,
+                    48,
+                    16,
+                    0
+                  ],
+                  "size": [
+                    "fill",
+                    "hug"
+                  ]
+                }
+              ],
+              "children": [
+                {
+                  "id": "I9496:154363;3063:34762;4030:47088",
+                  "name": "header",
+                  "type": "frame",
+                  "autoLayout": [
+                    {
+                      "flow": "horizontal",
+                      "gap": 8,
+                      "padding": [
+                        16,
+                        0,
+                        16,
+                        0
+                      ],
+                      "size": [
+                        "fill",
+                        37
+                      ]
+                    }
+                  ],
+                  "children": [
+                    {
+                      "id": "I9496:154363;3063:34762;2853:9774",
+                      "name": "Use drag and drop to start",
+                      "type": "text",
+                      "color": "#ffffff",
+                      "text": "Choose where to transfer",
+                      "size": [
+                        "fill",
+                        37
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "I9496:154363;3063:34762;3063:40330",
+                  "name": "Music / Streams",
+                  "type": "instance",
+                  "color": "#121212",
+                  "autoLayout": [
+                    {
+                      "alignment": "center",
+                      "flow": "vertical",
+                      "gap": 16,
+                      "padding": [
+                        0,
+                        0,
+                        0,
+                        32
+                      ],
+                      "size": [
+                        288,
+                        400
+                      ]
+                    }
+                  ],
+                  "children": [
+                    {
+                      "id": "I9496:154363;3063:34762;3063:40330;3063:40204",
+                      "name": "Stroke 1",
+                      "type": "frame",
+                      "autoLayout": [
+                        {
+                          "alignment": "center",
+                          "flow": "horizontal",
+                          "gap": 16,
+                          "size": [
+                            296,
+                            112
+                          ]
+                        }
+                      ],
+                      "children": [
+                        {
+                          "id": "I9496:154363;3063:34762;3063:40330;3063:40206",
+                          "name": "Music / Stream",
+                          "type": "instance",
+                          "autoLayout": [
+                            {
+                              "alignment": "center",
+                              "flow": "vertical",
+                              "gap": 12,
+                              "padding": [
+                                0,
+                                12,
+                                0,
+                                0
+                              ],
+                              "size": [
+                                88,
+                                112
+                              ]
+                            }
+                          ],
+                          "children": [
+                            {
+                              "id": "I9496:154363;3063:34762;3063:40330;3063:40206;12033:91298",
+                              "name": "icon",
+                              "type": "icon",
+                              "box": [
+                                49,
+                                285,
+                                70,
+                                70
+                              ]
+                            },
+                            {
+                              "id": "I9496:154363;3063:34762;3063:40330;3063:40206;12033:91300",
+                              "name": "Name",
+                              "type": "text",
+                              "color": "#ffffff",
+                              "text": "Spotify",
+                              "size": [
+                                "fill",
+                                18
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "id": "I9496:154363;3063:34762;3063:40330;3063:40205",
+                          "name": "Music / Stream",
+                          "type": "instance",
+                          "autoLayout": [
+                            {
+                              "alignment": "center",
+                              "flow": "vertical",
+                              "gap": 12,
+                              "padding": [
+                                0,
+                                12,
+                                0,
+                                0
+                              ],
+                              "size": [
+                                88,
+                                112
+                              ]
+                            }
+                          ],
+                          "children": [
+                            {
+                              "id": "I9496:154363;3063:34762;3063:40330;3063:40205;3132:25164",
+                              "name": "icon",
+                              "type": "icon",
+                              "box": [
+                                153,
+                                285,
+                                70,
+                                70
+                              ]
+                            },
+                            {
+                              "id": "I9496:154363;3063:34762;3063:40330;3063:40205;3132:25166",
+                              "name": "Name",
+                              "type": "text",
+                              "color": "#ffffff",
+                              "text": "Spotify",
+                              "size": [
+                                "fill",
+                                18
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "id": "I9496:154363;3063:34762;3063:40330;3063:40207",
+                          "name": "Music / Stream",
+                          "type": "instance",
+                          "autoLayout": [
+                            {
+                              "alignment": "center",
+                              "flow": "vertical",
+                              "gap": 12,
+                              "padding": [
+                                0,
+                                12,
+                                0,
+                                0
+                              ],
+                              "size": [
+                                88,
+                                112
+                              ]
+                            }
+                          ],
+                          "children": [
+                            {
+                              "id": "I9496:154363;3063:34762;3063:40330;3063:40207;3058:18083",
+                              "name": "icon",
+                              "type": "frame",
+                              "color": "#ffffff",
+                              "autoLayout": [
+                                {
+                                  "size": [
+                                    70,
+                                    70
+                                  ]
+                                }
+                              ],
+                              "children": [
+                                {
+                                  "id": "I9496:154363;3063:34762;3063:40330;3063:40207;3055:18299",
+                                  "name": "Streams_60",
+                                  "type": "instance",
+                                  "box": [
+                                    257,
+                                    285,
+                                    70,
+                                    70
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "id": "I9496:154363;3063:34762;3063:40330;3063:40207;3055:18300",
+                              "name": "Name",
+                              "type": "text",
+                              "color": "#ffffff",
+                              "text": "YouTube Music",
+                              "size": [
+                                "fill",
+                                18
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "id": "I9496:154363;3063:34762;3063:40330;5088:65700",
+                          "name": "Music / Stream",
+                          "type": "instance",
+                          "size": [
+                            88,
+                            92
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "I9496:154363;3063:34762;3063:40330;3063:40208",
+                      "name": "Stroke 2 ",
+                      "type": "frame",
+                      "autoLayout": [
+                        {
+                          "alignment": "center",
+                          "flow": "horizontal",
+                          "gap": 16,
+                          "size": [
+                            296,
+                            112
+                          ]
+                        }
+                      ],
+                      "children": [
+                        {
+                          "id": "I9496:154363;3063:34762;3063:40330;3063:40209",
+                          "name": "Music / Stream",
+                          "type": "instance",
+                          "text": "Amazon Music",
+                          "size": [
+                            88,
+                            112
+                          ]
+                        },
+                        {
+                          "id": "I9496:154363;3063:34762;3063:40330;3063:40210",
+                          "name": "Music / Stream",
+                          "type": "instance",
+                          "autoLayout": [
+                            {
+                              "alignment": "center",
+                              "flow": "vertical",
+                              "gap": 12,
+                              "padding": [
+                                0,
+                                12,
+                                0,
+                                0
+                              ],
+                              "size": [
+                                88,
+                                112
+                              ]
+                            }
+                          ],
+                          "children": [
+                            {
+                              "id": "I9496:154363;3063:34762;3063:40330;3063:40210;12035:119774",
+                              "name": "icon",
+                              "type": "frame",
+                              "color": "#000000",
+                              "autoLayout": [
+                                {
+                                  "size": [
+                                    70,
+                                    70
+                                  ]
+                                }
+                              ],
+                              "children": [
+                                {
+                                  "id": "I9496:154363;3063:34762;3063:40330;3063:40210;12035:119775",
+                                  "name": "Streams_60",
+                                  "type": "instance",
+                                  "box": [
+                                    153,
+                                    413,
+                                    70,
+                                    70
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "id": "I9496:154363;3063:34762;3063:40330;3063:40210;12035:119776",
+                              "name": "Name",
+                              "type": "text",
+                              "color": "#ffffff",
+                              "text": "Yandex Music",
+                              "size": [
+                                "fill",
+                                18
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "id": "I9496:154363;3063:34762;3063:40330;3063:40211",
+                          "name": "Music / Stream",
+                          "type": "instance",
+                          "autoLayout": [
+                            {
+                              "alignment": "center",
+                              "flow": "vertical",
+                              "gap": 12,
+                              "padding": [
+                                0,
+                                12,
+                                0,
+                                0
+                              ],
+                              "size": [
+                                88,
+                                112
+                              ]
+                            }
+                          ],
+                          "children": [
+                            {
+                              "id": "I9496:154363;3063:34762;3063:40330;3063:40211;3058:18217",
+                              "name": "icon",
+                              "type": "frame",
+                              "color": "#3375f6",
+                              "autoLayout": [
+                                {
+                                  "size": [
+                                    70,
+                                    70
+                                  ]
+                                }
+                              ],
+                              "children": [
+                                {
+                                  "id": "I9496:154363;3063:34762;3063:40330;3063:40211;2853:9558",
+                                  "name": "Streams_60",
+                                  "type": "instance",
+                                  "box": [
+                                    257,
+                                    413,
+                                    70,
+                                    70
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "id": "I9496:154363;3063:34762;3063:40330;3063:40211;2846:9753",
+                              "name": "Name",
+                              "type": "text",
+                              "color": "#ffffff",
+                              "text": "VK",
+                              "size": [
+                                "fill",
+                                18
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "id": "I9496:154363;3063:34762;3063:40330;5088:93943",
+                          "name": "Music / Stream",
+                          "type": "instance",
+                          "autoLayout": [
+                            {
+                              "alignment": "center",
+                              "flow": "vertical",
+                              "gap": 12,
+                              "padding": [
+                                0,
+                                12,
+                                0,
+                                0
+                              ],
+                              "size": [
+                                88,
+                                96
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "I9496:154363;3063:34762;3063:40330;3063:40212",
+                      "name": "Stroke 3",
+                      "type": "frame",
+                      "autoLayout": [
+                        {
+                          "flow": "horizontal",
+                          "gap": 16,
+                          "size": [
+                            192,
+                            112
+                          ]
+                        }
+                      ],
+                      "children": [
+                        {
+                          "id": "I9496:154363;3063:34762;3063:40330;12035:124013",
+                          "name": "Music / Stream",
+                          "type": "instance",
+                          "text": "Sound.Cloud",
+                          "size": [
+                            88,
+                            112
+                          ]
+                        },
+                        {
+                          "id": "I9496:154363;3063:34762;3063:40330;3063:40214",
+                          "name": "Music / Stream",
+                          "type": "instance",
+                          "text": "Tidal",
+                          "size": [
+                            88,
+                            112
+                          ]
+                        },
+                        {
+                          "id": "I9496:154363;3063:34762;3063:40330;3063:40215",
+                          "name": "Music / Stream",
+                          "type": "instance",
+                          "size": [
+                            88,
+                            112
+                          ]
+                        },
+                        {
+                          "id": "I9496:154363;3063:34762;3063:40330;5088:97089",
+                          "name": "Music / Stream",
+                          "type": "instance",
+                          "size": [
+                            88,
+                            92
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "I9496:154363;3063:34762;3063:40330;3063:40216",
+                      "name": "Stroke 4",
+                      "type": "frame",
+                      "autoLayout": [
+                        {
+                          "flow": "horizontal",
+                          "gap": 16,
+                          "size": [
+                            296,
+                            112
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "I9496:154363;3063:34762;3063:40330;3063:40220",
+                      "name": "Stroke 5",
+                      "type": "frame",
+                      "autoLayout": [
+                        {
+                          "flow": "horizontal",
+                          "gap": 16,
+                          "size": [
+                            296,
+                            112
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "I9496:154363;3063:34762;3063:40330;3063:40224",
+                      "name": "Stroke 6",
+                      "type": "frame",
+                      "autoLayout": [
+                        {
+                          "flow": "horizontal",
+                          "gap": 16,
+                          "size": [
+                            296,
+                            112
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "I9496:154363;3063:34763",
+          "name": "System / Status Bar",
+          "type": "instance",
+          "box": [
+            0,
+            0,
+            375,
+            44
+          ],
+          "autoLayout": [
+            {
+              "flow": "vertical",
+              "gap": 10
+            }
+          ],
+          "children": [
+            {
+              "id": "I9496:154363;3063:34763;3051:26675",
+              "name": "status_bar",
+              "type": "frame",
+              "box": [
+                0,
+                0,
+                375,
+                44
+              ],
+              "children": [
+                {
+                  "id": "I9496:154363;3063:34763;3051:26676",
+                  "name": "right",
+                  "type": "icon",
+                  "box": [
+                    293,
+                    16,
+                    66,
+                    12
+                  ]
+                },
+                {
+                  "id": "I9496:154363;3063:34763;3051:26693",
+                  "name": "Time",
+                  "type": "text",
+                  "color": "#ffffff",
+                  "text": "9:41",
+                  "box": [
+                    21,
+                    12,
+                    54,
+                    18
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "I9496:154363;8782:278650",
+          "name": "buttons",
+          "type": "frame",
+          "box": [
+            33,
+            76,
+            310,
+            32
+          ],
+          "autoLayout": [
+            {
+              "flow": "horizontal",
+              "gap": 12
+            }
+          ],
+          "children": [
+            {
+              "id": "I9496:154363;3063:35225",
+              "name": "Buttons",
+              "type": "instance",
+              "color": "#bcbcbc",
+              "autoLayout": [
+                {
+                  "alignment": "center",
+                  "flow": "vertical",
+                  "gap": 16,
+                  "padding": [
+                    10,
+                    6,
+                    10,
+                    6
+                  ],
+                  "size": [
+                    176,
+                    32
+                  ]
+                }
+              ],
+              "children": [
+                {
+                  "id": "I9496:154363;3063:35225;3197:33273",
+                  "name": "Выбрать",
+                  "type": "text",
+                  "color": "#ffffff",
+                  "text": "Support • About • Logout",
+                  "size": [
+                    156,
+                    14
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "I9496:154363;8782:275409",
+              "name": "Buttons",
+              "type": "instance",
+              "color": "#bcbcbc",
+              "text": "All-in-One Player",
+              "size": [
+                122,
+                32
+              ]
+            }
+          ]
+        },
+        {
+          "id": "I9496:154363;9315:162569",
+          "name": "Bottom",
+          "type": "frame",
+          "box": [
+            0,
+            724,
+            375,
+            88
+          ],
+          "autoLayout": [
+            {
+              "flow": "vertical"
+            }
+          ],
+          "children": [
+            {
+              "id": "I9496:154363;8779:203409",
+              "name": "Music / List Track",
+              "type": "instance",
+              "autoLayout": [
+                {
+                  "flow": "vertical",
+                  "gap": 10,
+                  "padding": [
+                    16,
+                    8,
+                    16,
+                    8
+                  ],
+                  "size": [
+                    "fill",
+                    68
+                  ]
+                }
+              ],
+              "children": [
+                {
+                  "id": "I9496:154363;8779:203409;9300:229339",
+                  "name": "Pic",
+                  "type": "frame",
+                  "autoLayout": [
+                    {
+                      "flow": "vertical",
+                      "gap": 8,
+                      "size": [
+                        "fill",
+                        52
+                      ]
+                    }
+                  ],
+                  "children": [
+                    {
+                      "id": "I9496:154363;8779:203409;9302:55185",
+                      "name": "Fixed-aspect-ratio-spacer",
+                      "type": "instance",
+                      "autoLayout": [
+                        {
+                          "flow": "vertical",
+                          "size": [
+                            "fill",
+                            52
+                          ]
+                        }
+                      ],
+                      "children": [
+                        {
+                          "id": "I9496:154363;8779:203409;9302:55185;9303:26603",
+                          "name": "Aspect ratio keeper # Rotated Auto Layout",
+                          "type": "frame",
+                          "autoLayout": [
+                            {
+                              "alignment": "center",
+                              "flow": "vertical",
+                              "size": [
+                                "fill",
+                                52
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "I9496:154363;8779:203409;9303:202374",
+                      "name": "telegram-cloud-photo-size-4-5845967879252591429-y 1",
+                      "type": "rectangle",
+                      "box": [
+                        16,
+                        732,
+                        343,
+                        52
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "I9496:154363;3063:34851",
+              "name": "System / Bottom bar",
+              "type": "icon",
+              "box": [
+                0,
+                793,
+                375,
+                20
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "9496:154364",
+      "name": "Stream / Playlist",
+      "type": "instance",
+      "box": [
+        0,
+        44,
+        375,
+        768
+      ],
+      "children": [
+        {
+          "id": "I9496:154364;3132:29938",
+          "name": "Sheet",
+          "type": "frame",
+          "box": [
+            0,
+            44,
+            375,
+            768
+          ],
+          "autoLayout": [
+            {
+              "flow": "vertical"
+            }
+          ],
+          "children": [
+            {
+              "id": "I9496:154364;3064:24641",
+              "name": "Header / Stream",
+              "type": "instance",
+              "color": "#191919",
+              "autoLayout": [
+                {
+                  "flow": "vertical",
+                  "gap": 24,
+                  "size": [
+                    "fill",
+                    100
+                  ]
+                }
+              ],
+              "children": [
+                {
+                  "id": "I9496:154364;3064:24641;3064:21533",
+                  "name": "System / Collapse",
+                  "type": "icon",
+                  "box": [
+                    0,
+                    44,
+                    375,
+                    8
+                  ]
+                },
+                {
+                  "id": "I9496:154364;3064:24641;3064:52372",
+                  "name": "Content",
+                  "type": "frame",
+                  "autoLayout": [
+                    {
+                      "flow": "vertical",
+                      "size": [
+                        "fill",
+                        68
+                      ]
+                    }
+                  ],
+                  "children": [
+                    {
+                      "id": "I9496:154364;3064:24641;3064:21534",
+                      "name": "Atom / Header",
+                      "type": "instance",
+                      "autoLayout": [
+                        {
+                          "flow": "vertical",
+                          "gap": 8,
+                          "padding": [
+                            16,
+                            16,
+                            16,
+                            4
+                          ],
+                          "size": [
+                            "fill",
+                            52
+                          ]
+                        }
+                      ],
+                      "children": [
+                        {
+                          "id": "I9496:154364;3064:24641;3064:21534;8266:90213",
+                          "name": "nums and buttons",
+                          "type": "frame",
+                          "autoLayout": [
+                            {
+                              "alignment": "center",
+                              "flow": "horizontal",
+                              "gap": 8,
+                              "size": [
+                                "fill",
+                                32
+                              ]
+                            }
+                          ],
+                          "children": [
+                            {
+                              "id": "I9496:154364;3064:24641;3064:21534;8267:106578",
+                              "name": "Left side",
+                              "type": "frame",
+                              "autoLayout": [
+                                {
+                                  "flow": "vertical",
+                                  "gap": 2,
+                                  "size": [
+                                    "fill",
+                                    31
+                                  ]
+                                }
+                              ],
+                              "children": [
+                                {
+                                  "id": "I9496:154364;3064:24641;3064:21534;8267:107391",
+                                  "name": "subtitle",
+                                  "type": "frame",
+                                  "autoLayout": [
+                                    {
+                                      "flow": "horizontal",
+                                      "gap": 4,
+                                      "size": [
+                                        88,
+                                        10
+                                      ]
+                                    }
+                                  ],
+                                  "children": [
+                                    {
+                                      "id": "I9496:154364;3064:24641;3064:21534;8267:107128",
+                                      "name": "Added",
+                                      "type": "text",
+                                      "color": "#ffffff",
+                                      "text": "in Apple",
+                                      "size": [
+                                        32,
+                                        10
+                                      ]
+                                    },
+                                    {
+                                      "id": "I9496:154364;3064:24641;3064:21534;8267:107129",
+                                      "name": "Found",
+                                      "type": "text",
+                                      "color": "#ffffff",
+                                      "text": "found",
+                                      "size": [
+                                        23,
+                                        10
+                                      ]
+                                    },
+                                    {
+                                      "id": "I9496:154364;3064:24641;3064:21534;8267:107130",
+                                      "name": "In first service",
+                                      "type": "text",
+                                      "color": "#ffffff",
+                                      "text": "added",
+                                      "size": [
+                                        25,
+                                        10
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "id": "I9496:154364;3064:24641;3064:21534;3064:70843",
+                                  "name": "NUMS",
+                                  "type": "frame",
+                                  "autoLayout": [
+                                    {
+                                      "flow": "horizontal",
+                                      "gap": 6,
+                                      "size": [
+                                        "fill",
+                                        19
+                                      ]
+                                    }
+                                  ],
+                                  "children": [
+                                    {
+                                      "id": "I9496:154364;3064:24641;3064:21534;3064:22050",
+                                      "name": "NUM – In first servic",
+                                      "type": "text",
+                                      "color": "#ffffff",
+                                      "text": "1100",
+                                      "size": [
+                                        39,
+                                        19
+                                      ]
+                                    },
+                                    {
+                                      "id": "I9496:154364;3064:24641;3064:21534;8267:101583",
+                                      "name": "NUM – Found",
+                                      "type": "text",
+                                      "color": "#ffffff",
+                                      "text": "/ 30",
+                                      "size": [
+                                        32,
+                                        19
+                                      ]
+                                    },
+                                    {
+                                      "id": "I9496:154364;3064:24641;3064:21534;3064:69461",
+                                      "name": "NUM – Added",
+                                      "type": "text",
+                                      "color": "#ffffff",
+                                      "text": "/ 23",
+                                      "size": [
+                                        31,
+                                        19
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "id": "I9496:154364;3064:24641;3064:21534;4151:51240",
+                              "name": "Buttons",
+                              "type": "frame",
+                              "autoLayout": [
+                                {
+                                  "flow": "horizontal",
+                                  "size": [
+                                    114,
+                                    32
+                                  ]
+                                }
+                              ],
+                              "children": [
+                                {
+                                  "id": "I9496:154364;3064:24641;3064:21534;4151:52100",
+                                  "name": "Fade",
+                                  "type": "rectangle",
+                                  "gradient": [
+                                    "#191919",
+                                    "#19191900"
+                                  ],
+                                  "size": [
+                                    56,
+                                    32
+                                  ]
+                                },
+                                {
+                                  "id": "I9496:154364;3064:24641;3064:21534;4151:50478",
+                                  "name": "Buttons",
+                                  "type": "frame",
+                                  "color": "#191919",
+                                  "autoLayout": [
+                                    {
+                                      "flow": "horizontal",
+                                      "gap": 4,
+                                      "size": [
+                                        58,
+                                        32
+                                      ]
+                                    }
+                                  ],
+                                  "children": [
+                                    {
+                                      "id": "I9496:154364;3064:24641;3064:21534;3198:33293",
+                                      "name": "Buttons",
+                                      "type": "instance",
+                                      "color": "#bcbcbc",
+                                      "size": [
+                                        92,
+                                        32
+                                      ]
+                                    },
+                                    {
+                                      "id": "I9496:154364;3064:24641;3064:21534;3198:33702",
+                                      "name": "Buttons",
+                                      "type": "instance",
+                                      "color": "#bcbcbc",
+                                      "text": "Select",
+                                      "size": [
+                                        58,
+                                        32
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "I9496:154364;3064:24641;3064:52062",
+                      "name": "Divider",
+                      "type": "instance",
+                      "autoLayout": [
+                        {
+                          "flow": "vertical",
+                          "gap": 4,
+                          "padding": [
+                            16,
+                            0,
+                            16,
+                            0
+                          ],
+                          "size": [
+                            "fill",
+                            16
+                          ]
+                        }
+                      ],
+                      "children": [
+                        {
+                          "id": "I9496:154364;3064:24641;3064:52062;3064:71724",
+                          "name": "description",
+                          "type": "text",
+                          "color": "#ffffff",
+                          "text": "Stay tuned, we're finding the best matches...",
+                          "size": [
+                            174,
+                            10
+                          ]
+                        },
+                        {
+                          "id": "I9496:154364;3064:24641;3064:52062;3051:19519",
+                          "name": "Progress",
+                          "type": "icon",
+                          "box": [
+                            16,
+                            142,
+                            343,
+                            2
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "I9496:154364;3064:64226",
+              "name": "Content",
+              "type": "frame",
+              "gradient": [
+                "#191919",
+                "#18bc51"
+              ],
+              "autoLayout": [
+                {
+                  "flow": "vertical",
+                  "size": [
+                    "fill",
+                    "fill"
+                  ]
+                }
+              ],
+              "children": [
+                {
+                  "id": "I9496:154364;3064:72354",
+                  "name": "Music / Albums",
+                  "type": "instance",
+                  "autoLayout": [
+                    {
+                      "flow": "vertical",
+                      "gap": 24,
+                      "padding": [
+                        16,
+                        24,
+                        0,
+                        16
+                      ],
+                      "size": [
+                        "fill",
+                        166
+                      ]
+                    }
+                  ],
+                  "children": [
+                    {
+                      "id": "I9496:154364;3064:72354;3034:17793",
+                      "name": "Albums",
+                      "type": "frame",
+                      "autoLayout": [
+                        {
+                          "flow": "horizontal",
+                          "gap": 16,
+                          "padding": [
+                            0,
+                            0,
+                            16,
+                            0
+                          ],
+                          "size": [
+                            "fill",
+                            126
+                          ]
+                        }
+                      ],
+                      "children": [
+                        {
+                          "id": "I9496:154364;3064:72354;3034:17502",
+                          "name": "Album_1",
+                          "type": "instance",
+                          "autoLayout": [
+                            {
+                              "flow": "vertical",
+                              "gap": 6,
+                              "size": [
+                                80,
+                                117
+                              ]
+                            }
+                          ],
+                          "children": [
+                            {
+                              "id": "I9496:154364;3064:72354;3034:17502;3034:17493",
+                              "name": "Cover",
+                              "type": "frame",
+                              "color": "#ffffff",
+                              "size": [
+                                80,
+                                80
+                              ]
+                            },
+                            {
+                              "id": "I9496:154364;3064:72354;3034:17502;3034:17496",
+                              "name": "AlbumName",
+                              "type": "icon",
+                              "box": [
+                                16,
+                                254,
+                                80,
+                                31
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "id": "I9496:154364;3064:72354;3034:17879",
+                          "name": "Album_2",
+                          "type": "instance",
+                          "autoLayout": [
+                            {
+                              "flow": "vertical",
+                              "gap": 6,
+                              "size": [
+                                80,
+                                126
+                              ]
+                            }
+                          ],
+                          "children": [
+                            {
+                              "id": "I9496:154364;3064:72354;3034:17879;3942:43972",
+                              "name": "Cover",
+                              "type": "frame",
+                              "size": [
+                                80,
+                                80
+                              ],
+                              "children": [
+                                {
+                                  "id": "I9496:154364;3064:72354;3034:17879;3942:43976",
+                                  "name": "icon",
+                                  "type": "instance",
+                                  "box": [
+                                    168,
+                                    172,
+                                    20,
+                                    20
+                                  ]
+                                },
+                                {
+                                  "id": "I9496:154364;3064:72354;3034:17879;8266:76104",
+                                  "name": "overlay",
+                                  "type": "rectangle",
+                                  "color": "#000000",
+                                  "box": [
+                                    112,
+                                    168,
+                                    80,
+                                    80
+                                  ]
+                                },
+                                {
+                                  "id": "I9496:154364;3064:72354;3034:17879;8266:76046",
+                                  "name": "added",
+                                  "type": "text",
+                                  "color": "#ffffff",
+                                  "text": "Added",
+                                  "box": [
+                                    161,
+                                    177,
+                                    26,
+                                    10
+                                  ]
+                                },
+                                {
+                                  "id": "I9496:154364;3064:72354;3034:17879;8266:78688",
+                                  "name": "amount",
+                                  "type": "text",
+                                  "color": "#ffffff",
+                                  "text": "22",
+                                  "box": [
+                                    169,
+                                    226,
+                                    15,
+                                    14
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "id": "I9496:154364;3064:72354;3034:17879;3942:43973",
+                              "name": "AlbumName",
+                              "type": "frame",
+                              "autoLayout": [
+                                {
+                                  "flow": "vertical",
+                                  "gap": 4,
+                                  "size": [
+                                    "fill",
+                                    40
+                                  ]
+                                }
+                              ],
+                              "children": [
+                                {
+                                  "id": "I9496:154364;3064:72354;3034:17879;3942:43974",
+                                  "name": "Name",
+                                  "type": "text",
+                                  "color": "#ffffff",
+                                  "text": "Sweetest Pie",
+                                  "size": [
+                                    "fill",
+                                    18
+                                  ]
+                                },
+                                {
+                                  "id": "I9496:154364;3064:72354;3034:17879;3942:43975",
+                                  "name": "Artist",
+                                  "type": "text",
+                                  "color": "#ffffff",
+                                  "text": "Dua Lipa, M..",
+                                  "size": [
+                                    "fill",
+                                    18
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "id": "I9496:154364;3064:72354;3064:72134",
+                          "name": "Album_3",
+                          "type": "instance",
+                          "autoLayout": [
+                            {
+                              "flow": "vertical",
+                              "gap": 6,
+                              "size": [
+                                80,
+                                126
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "id": "I9496:154364;3064:72354;3064:72141",
+                          "name": "Album_4",
+                          "type": "instance",
+                          "size": [
+                            80,
+                            126
+                          ]
+                        },
+                        {
+                          "id": "I9496:154364;3064:72354;3132:37988",
+                          "name": "Album_5",
+                          "type": "instance",
+                          "size": [
+                            80,
+                            126
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "I9496:154364;3064:60259",
+                  "name": "Music",
+                  "type": "instance",
+                  "autoLayout": [
+                    {
+                      "flow": "vertical",
+                      "gap": 8,
+                      "padding": [
+                        20,
+                        8,
+                        20,
+                        8
+                      ],
+                      "size": [
+                        "fill",
+                        117
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "I9496:154364;3064:44662",
+                  "name": "Music / Tracklist",
+                  "type": "instance",
+                  "autoLayout": [
+                    {
+                      "flow": "vertical",
+                      "padding": [
+                        0,
+                        8,
+                        0,
+                        8
+                      ],
+                      "size": [
+                        "fill",
+                        692
+                      ]
+                    }
+                  ],
+                  "children": [
+                    {
+                      "id": "I9496:154364;3064:44662;3032:15920",
+                      "name": "Music / List Track",
+                      "type": "instance",
+                      "autoLayout": [
+                        {
+                          "flow": "vertical",
+                          "gap": 5,
+                          "padding": [
+                            0,
+                            6,
+                            0,
+                            0
+                          ],
+                          "size": [
+                            "fill",
+                            60
+                          ]
+                        }
+                      ],
+                      "children": [
+                        {
+                          "id": "I9496:154364;3064:44662;3032:15920;3032:15431",
+                          "name": "content",
+                          "type": "frame",
+                          "autoLayout": [
+                            {
+                              "alignment": "center",
+                              "flow": "horizontal",
+                              "gap": 12,
+                              "padding": [
+                                16,
+                                0,
+                                16,
+                                0
+                              ],
+                              "size": [
+                                "fill",
+                                48
+                              ]
+                            }
+                          ],
+                          "children": [
+                            {
+                              "id": "I9496:154364;3064:44662;3032:15920;3062:21146",
+                              "name": "Track cover",
+                              "type": "frame",
+                              "color": "#ffffff",
+                              "size": [
+                                48,
+                                48
+                              ]
+                            },
+                            {
+                              "id": "I9496:154364;3064:44662;3032:15920;3032:15433",
+                              "name": "track",
+                              "type": "icon",
+                              "box": [
+                                76,
+                                332,
+                                283,
+                                32
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "id": "I9496:154364;3064:44662;3032:15920;3032:15440",
+                          "name": "Divider",
+                          "type": "icon",
+                          "box": [
+                            0,
+                            377,
+                            375,
+                            1
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "I9496:154364;3064:44662;3032:15933",
+                      "name": "Music / List Track",
+                      "type": "instance",
+                      "autoLayout": [
+                        {
+                          "flow": "vertical",
+                          "gap": 5,
+                          "padding": [
+                            0,
+                            6,
+                            0,
+                            0
+                          ],
+                          "size": [
+                            "fill",
+                            60
+                          ]
+                        }
+                      ],
+                      "children": [
+                        {
+                          "id": "I9496:154364;3064:44662;3032:15933;3032:15373",
+                          "name": "content",
+                          "type": "frame",
+                          "autoLayout": [
+                            {
+                              "alignment": "center",
+                              "flow": "horizontal",
+                              "gap": 12,
+                              "padding": [
+                                16,
+                                0,
+                                16,
+                                0
+                              ],
+                              "size": [
+                                "fill",
+                                48
+                              ]
+                            }
+                          ],
+                          "children": [
+                            {
+                              "id": "I9496:154364;3064:44662;3032:15933;3062:19311",
+                              "name": "cover",
+                              "type": "frame",
+                              "size": [
+                                48,
+                                48
+                              ],
+                              "children": [
+                                {
+                                  "id": "I9496:154364;3064:44662;3032:15933;3064:58338",
+                                  "name": "Blacl_50%",
+                                  "type": "rectangle",
+                                  "color": "#000000",
+                                  "box": [
+                                    16,
+                                    384,
+                                    48,
+                                    48
+                                  ]
+                                },
+                                {
+                                  "id": "I9496:154364;3064:44662;3032:15933;3062:19312",
+                                  "name": "Icon_48",
+                                  "type": "instance",
+                                  "box": [
+                                    32,
+                                    400,
+                                    16,
+                                    16
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "id": "I9496:154364;3064:44662;3032:15933;3032:15375",
+                              "name": "track",
+                              "type": "frame",
+                              "autoLayout": [
+                                {
+                                  "alignment": "center",
+                                  "flow": "horizontal",
+                                  "gap": 12,
+                                  "size": [
+                                    "fill",
+                                    39
+                                  ]
+                                }
+                              ],
+                              "children": [
+                                {
+                                  "id": "I9496:154364;3064:44662;3032:15933;3032:15376",
+                                  "name": "track",
+                                  "type": "frame",
+                                  "autoLayout": [
+                                    {
+                                      "flow": "vertical",
+                                      "gap": 6,
+                                      "size": [
+                                        "fill",
+                                        39
+                                      ]
+                                    }
+                                  ],
+                                  "children": [
+                                    {
+                                      "id": "I9496:154364;3064:44662;3032:15933;3032:15377",
+                                      "name": "name",
+                                      "type": "text",
+                                      "color": "#ffffff",
+                                      "text": "drivers license",
+                                      "size": [
+                                        "fill",
+                                        19
+                                      ]
+                                    },
+                                    {
+                                      "id": "I9496:154364;3064:44662;3032:15933;3032:15378",
+                                      "name": "artist",
+                                      "type": "text",
+                                      "color": "#ffffff",
+                                      "text": "Olivia Rodrigo",
+                                      "size": [
+                                        "fill",
+                                        14
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "id": "I9496:154364;3064:44662;3032:15933;3032:15379",
+                                  "name": "right",
+                                  "type": "frame",
+                                  "autoLayout": [
+                                    {
+                                      "alignment": "end",
+                                      "flow": "vertical",
+                                      "gap": 8,
+                                      "size": [
+                                        44,
+                                        "fill"
+                                      ]
+                                    }
+                                  ],
+                                  "children": [
+                                    {
+                                      "id": "I9496:154364;3064:44662;3032:15933;3032:15381",
+                                      "name": "added",
+                                      "type": "text",
+                                      "color": "#ffffff",
+                                      "text": "Added",
+                                      "size": [
+                                        44,
+                                        "fill"
+                                      ]
+                                    },
+                                    {
+                                      "id": "I9496:154364;3064:44662;3032:15933;8266:43608",
+                                      "name": "duration",
+                                      "type": "text",
+                                      "color": "#ffffff",
+                                      "text": "2:01",
+                                      "size": [
+                                        24,
+                                        14
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "id": "I9496:154364;3064:44662;3032:15933;3032:15382",
+                          "name": "Divider",
+                          "type": "icon",
+                          "box": [
+                            0,
+                            437,
+                            375,
+                            1
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "I9496:154364;3064:44662;3032:15950",
+                      "name": "Music / List Track",
+                      "type": "instance",
+                      "size": [
+                        "fill",
+                        68
+                      ]
+                    },
+                    {
+                      "id": "I9496:154364;3064:44662;3032:15966",
+                      "name": "Music / List Track",
+                      "type": "instance",
+                      "autoLayout": [
+                        {
+                          "flow": "vertical",
+                          "gap": 5,
+                          "padding": [
+                            0,
+                            6,
+                            0,
+                            0
+                          ],
+                          "size": [
+                            "fill",
+                            60
+                          ]
+                        }
+                      ],
+                      "children": [
+                        {
+                          "id": "I9496:154364;3064:44662;3032:15966;3941:44398",
+                          "name": "content",
+                          "type": "frame",
+                          "autoLayout": [
+                            {
+                              "alignment": "center",
+                              "flow": "horizontal",
+                              "gap": 12,
+                              "padding": [
+                                16,
+                                0,
+                                16,
+                                0
+                              ],
+                              "size": [
+                                "fill",
+                                48
+                              ]
+                            }
+                          ],
+                          "children": [
+                            {
+                              "id": "I9496:154364;3064:44662;3032:15966;3941:44399",
+                              "name": "cover",
+                              "type": "frame",
+                              "size": [
+                                48,
+                                48
+                              ],
+                              "children": [
+                                {
+                                  "id": "I9496:154364;3064:44662;3032:15966;3941:44400",
+                                  "name": "Blacl_50%",
+                                  "type": "rectangle",
+                                  "color": "#000000",
+                                  "box": [
+                                    16,
+                                    513,
+                                    48,
+                                    48
+                                  ]
+                                },
+                                {
+                                  "id": "I9496:154364;3064:44662;3032:15966;3941:44401",
+                                  "name": "Icon_48",
+                                  "type": "instance",
+                                  "box": [
+                                    32,
+                                    529,
+                                    16,
+                                    16
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "id": "I9496:154364;3064:44662;3032:15966;3941:44402",
+                              "name": "track",
+                              "type": "frame",
+                              "autoLayout": [
+                                {
+                                  "alignment": "end",
+                                  "flow": "horizontal",
+                                  "gap": 12,
+                                  "size": [
+                                    "fill",
+                                    39
+                                  ]
+                                }
+                              ],
+                              "children": [
+                                {
+                                  "id": "I9496:154364;3064:44662;3032:15966;3941:44403",
+                                  "name": "track",
+                                  "type": "frame",
+                                  "autoLayout": [
+                                    {
+                                      "flow": "vertical",
+                                      "gap": 6,
+                                      "size": [
+                                        "fill",
+                                        39
+                                      ]
+                                    }
+                                  ],
+                                  "children": [
+                                    {
+                                      "id": "I9496:154364;3064:44662;3032:15966;3941:44404",
+                                      "name": "name",
+                                      "type": "text",
+                                      "color": "#ffffff",
+                                      "text": "Blinding Lights",
+                                      "size": [
+                                        "fill",
+                                        19
+                                      ]
+                                    },
+                                    {
+                                      "id": "I9496:154364;3064:44662;3032:15966;3941:44405",
+                                      "name": "artist",
+                                      "type": "text",
+                                      "color": "#ffffff",
+                                      "text": "The Weeknd",
+                                      "size": [
+                                        "fill",
+                                        14
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "id": "I9496:154364;3064:44662;3032:15966;3941:44406",
+                                  "name": "right",
+                                  "type": "frame",
+                                  "autoLayout": [
+                                    {
+                                      "alignment": "end",
+                                      "flow": "vertical",
+                                      "gap": 5,
+                                      "size": [
+                                        25,
+                                        14
+                                      ]
+                                    }
+                                  ],
+                                  "children": [
+                                    {
+                                      "id": "I9496:154364;3064:44662;3032:15966;3941:44408",
+                                      "name": "duration",
+                                      "type": "text",
+                                      "color": "#ffffff",
+                                      "text": "2:51",
+                                      "size": [
+                                        25,
+                                        14
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "id": "I9496:154364;3064:44662;3032:15966;3941:44409",
+                          "name": "Divider",
+                          "type": "icon",
+                          "box": [
+                            0,
+                            566,
+                            375,
+                            1
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "I9496:154364;3064:44662;3032:15982",
+                      "name": "Music / List Track",
+                      "type": "instance",
+                      "text": [
+                        "Venom",
+                        "Eminem",
+                        "14:29"
+                      ],
+                      "size": [
+                        "fill",
+                        60
+                      ]
+                    },
+                    {
+                      "id": "I9496:154364;3064:44662;3034:24912",
+                      "name": "Music / List Track",
+                      "type": "instance",
+                      "text": [
+                        "Positions",
+                        "Ariana Grande",
+                        "2:40"
+                      ],
+                      "size": [
+                        "fill",
+                        60
+                      ]
+                    },
+                    {
+                      "id": "I9496:154364;3064:44662;3034:26013",
+                      "name": "Music / List Track",
+                      "type": "instance",
+                      "text": [
+                        "Multitude",
+                        "Stromae",
+                        "14:25"
+                      ],
+                      "size": [
+                        "fill",
+                        60
+                      ]
+                    },
+                    {
+                      "id": "I9496:154364;3064:44662;3034:27338",
+                      "name": "Music / List Track",
+                      "type": "instance",
+                      "text": [
+                        "Mood (feat. iann dior)",
+                        "24kGoldn",
+                        "14:29"
+                      ],
+                      "size": [
+                        "fill",
+                        60
+                      ]
+                    },
+                    {
+                      "id": "I9496:154364;3064:44662;3034:28887",
+                      "name": "Music / List Track",
+                      "type": "instance",
+                      "text": [
+                        "34+35",
+                        "Ariana Grande",
+                        "4:29"
+                      ],
+                      "size": [
+                        "fill",
+                        60
+                      ]
+                    },
+                    {
+                      "id": "I9496:154364;3064:44662;3034:30660",
+                      "name": "Music / List Track",
+                      "type": "instance",
+                      "text": [
+                        "Bones",
+                        "Imagine Dragons",
+                        "3:26"
+                      ],
+                      "size": [
+                        "fill",
+                        60
+                      ]
+                    },
+                    {
+                      "id": "I9496:154364;3064:44662;9303:204067",
+                      "name": "Music / List Track",
+                      "type": "instance",
+                      "text": [
+                        "Venom",
+                        "Eminem",
+                        "14:29"
+                      ],
+                      "size": [
+                        "fill",
+                        68
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "I9496:154364;3173:41084",
+          "name": "Bottom / Payment",
+          "type": "instance",
+          "box": [
+            0,
+            508,
+            375,
+            305
+          ],
+          "autoLayout": [
+            {
+              "alignment": "center",
+              "flow": "vertical",
+              "gap": 10,
+              "padding": [
+                20,
+                8,
+                20,
+                56
+              ],
+              "size": [
+                375,
+                "hug"
+              ]
+            }
+          ],
+          "children": [
+            {
+              "id": "I9496:154364;3173:41084;9577:251830",
+              "name": "Music",
+              "type": "instance",
+              "text": [
+                "Unlimited transfer from Apple Music to Spotify + Ad-Free",
+                "0.99 USD",
+                "45 days access"
+              ],
+              "size": [
+                375,
+                101
+              ]
+            },
+            {
+              "id": "I9496:154364;3173:41084;11738:59804",
+              "name": "Frame 277",
+              "type": "instance",
+              "color": "#ffffff",
+              "autoLayout": [
+                {
+                  "alignment": "center",
+                  "flow": "horizontal",
+                  "gap": 12,
+                  "padding": [
+                    20,
+                    16,
+                    16,
+                    16
+                  ],
+                  "size": [
+                    "fill",
+                    64
+                  ]
+                }
+              ],
+              "children": [
+                {
+                  "id": "I9496:154364;3173:41084;11738:59804;11738:96913",
+                  "name": "contetn",
+                  "type": "frame",
+                  "autoLayout": [
+                    {
+                      "flow": "vertical",
+                      "gap": 8,
+                      "size": [
+                        "fill",
+                        27
+                      ]
+                    }
+                  ],
+                  "children": [
+                    {
+                      "id": "I9496:154364;3173:41084;11738:59804;11738:95989",
+                      "name": "Status",
+                      "type": "frame",
+                      "autoLayout": [
+                        {
+                          "flow": "vertical",
+                          "gap": 8,
+                          "size": [
+                            "fill",
+                            14
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "I9496:154364;3173:41084;11738:59804;10714:63135",
+                      "name": "Progress",
+                      "type": "frame",
+                      "autoLayout": [
+                        {
+                          "flow": "vertical",
+                          "gap": 8,
+                          "size": [
+                            "fill",
+                            27
+                          ]
+                        }
+                      ],
+                      "children": [
+                        {
+                          "id": "I9496:154364;3173:41084;11738:59804;10714:63136",
+                          "name": "Progress",
+                          "type": "frame",
+                          "autoLayout": [
+                            {
+                              "alignment": "center",
+                              "flow": "horizontal",
+                              "gap": 4,
+                              "size": [
+                                "fill",
+                                17
+                              ]
+                            }
+                          ],
+                          "children": [
+                            {
+                              "id": "I9496:154364;3173:41084;11738:59804;10714:63137",
+                              "name": "Finding library matches",
+                              "type": "text",
+                              "color": "#ffffff",
+                              "text": "Finding matches...",
+                              "size": [
+                                "fill",
+                                17
+                              ]
+                            },
+                            {
+                              "id": "I9496:154364;3173:41084;11738:59804;10714:63138",
+                              "name": "restart",
+                              "type": "instance",
+                              "size": [
+                                16,
+                                16
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "id": "I9496:154364;3173:41084;11738:59804;10714:63139",
+                          "name": "Progress",
+                          "type": "icon",
+                          "box": [
+                            40,
+                            670,
+                            247,
+                            2
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "I9496:154364;3173:41084;11738:59804;11820:102320",
+                  "name": "Buttons",
+                  "type": "instance",
+                  "color": "#bcbcbc",
+                  "autoLayout": [
+                    {
+                      "alignment": "center",
+                      "flow": "vertical",
+                      "gap": 16,
+                      "padding": [
+                        12,
+                        8,
+                        12,
+                        8
+                      ],
+                      "size": [
+                        40,
+                        "fill"
+                      ]
+                    }
+                  ],
+                  "children": [
+                    {
+                      "id": "I9496:154364;3173:41084;11738:59804;11820:102320;9218:198006",
+                      "name": "App Store_16",
+                      "type": "instance",
+                      "size": [
+                        16,
+                        16
+                      ],
+                      "children": [
+                        {
+                          "id": "I9496:154364;3173:41084;11738:59804;11820:102320;9218:198006;11820:118296",
+                          "name": "?",
+                          "type": "text",
+                          "color": "#ffffff",
+                          "text": "?",
+                          "box": [
+                            314,
+                            647,
+                            11,
+                            24
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "I9496:154364;3173:41084;9479:195269",
+              "name": "Transfer Button",
+              "type": "instance",
+              "color": "#ffffff",
+              "autoLayout": [
+                {
+                  "alignment": "center",
+                  "flow": "horizontal",
+                  "gap": 10,
+                  "padding": [
+                    16,
+                    18,
+                    16,
+                    18
+                  ],
+                  "size": [
+                    "fill",
+                    56
+                  ]
+                }
+              ],
+              "children": [
+                {
+                  "id": "I9496:154364;3173:41084;9479:195269;9496:154794",
+                  "name": "text",
+                  "type": "text",
+                  "color": "#000000",
+                  "text": "Add found items",
+                  "size": [
+                    "fill",
+                    20
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "9496:154365",
+      "name": "System / Bottom bar",
+      "type": "icon",
+      "box": [
+        0,
+        792,
+        375,
+        20
+      ]
+    }
+  ]
+}
