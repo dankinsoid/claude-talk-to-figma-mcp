@@ -645,349 +645,44 @@ server.tool(
   }
 );
 
-function rgbaToHex(color: any): string {
-  // skip if color is already hex
-  if (color.startsWith('#')) {
-    return color;
-  }
 
-  const r = Math.round(color.r * 255);
-  const g = Math.round(color.g * 255);
-  const b = Math.round(color.b * 255);
-  const a = Math.round(color.a * 255);
-
-  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}${a === 255 ? '' : a.toString(16).padStart(2, '0')}`;
-}
-
-function filterFigmaNode(node: any) {
-  // Skip VECTOR type nodes
-  if (node.type === "VECTOR") {
-    return null;
-  }
-
-  const filtered: any = {
-    id: node.id,
-    name: node.name,
-    type: node.type,
-  };
-
-  if (node.fills && node.fills.length > 0) {
-    filtered.fills = node.fills.map((fill: any) => {
-      const processedFill = { ...fill };
-
-      // Remove boundVariables and imageRef
-      delete processedFill.boundVariables;
-      delete processedFill.imageRef;
-
-      // Process gradientStops if present
-      if (processedFill.gradientStops) {
-        processedFill.gradientStops = processedFill.gradientStops.map((stop: any) => {
-          const processedStop = { ...stop };
-          // Convert color to hex if present
-          if (processedStop.color) {
-            processedStop.color = rgbaToHex(processedStop.color);
-          }
-          // Remove boundVariables
-          delete processedStop.boundVariables;
-          return processedStop;
-        });
-      }
-
-      // Convert solid fill colors to hex
-      if (processedFill.color) {
-        processedFill.color = rgbaToHex(processedFill.color);
-      }
-
-      return processedFill;
-    });
-  }
-
-  if (node.strokes && node.strokes.length > 0) {
-    filtered.strokes = node.strokes.map((stroke: any) => {
-      const processedStroke = { ...stroke };
-      // Remove boundVariables
-      delete processedStroke.boundVariables;
-      // Convert color to hex if present
-      if (processedStroke.color) {
-        processedStroke.color = rgbaToHex(processedStroke.color);
-      }
-      return processedStroke;
-    });
-  }
-
-  if (node.cornerRadius !== undefined) {
-    filtered.cornerRadius = node.cornerRadius;
-  }
-
-  if (node.absoluteBoundingBox) {
-    filtered.absoluteBoundingBox = node.absoluteBoundingBox;
-  }
-
-  if (node.characters) {
-    filtered.characters = node.characters;
-  }
-
-  if (node.style) {
-    filtered.style = {
-      fontFamily: node.style.fontFamily,
-      fontStyle: node.style.fontStyle,
-      fontWeight: node.style.fontWeight,
-      fontSize: node.style.fontSize,
-      textAlignHorizontal: node.style.textAlignHorizontal,
-      letterSpacing: node.style.letterSpacing,
-      lineHeightPx: node.style.lineHeightPx
-    };
-  }
-
-  if (node.children) {
-    filtered.children = node.children
-      .map((child: any) => filterFigmaNode(child))
-      .filter((child: any) => child !== null); // Remove null children (VECTOR nodes)
-  }
-
-  return filtered;
-}
-
-// Create Rectangle Tool
+// Write Nodes Tool — the create-side twin of edit_nodes
+// @ai-generated(solo)
 server.tool(
-  "create_rectangle",
-  "Create a new rectangle in Figma",
+  "write_nodes",
+  "Create new nodes from raw Figma JSON — the create-side twin of edit_nodes, a Write tool for the node tree instead of text. Pass `nodes`: an array of node specs. Each spec is `{type, ...props, children?}`: `type` is the Figma node type to create (RECTANGLE, FRAME, TEXT, ELLIPSE, LINE, STAR, POLYGON, VECTOR, COMPONENT, SECTION, SLICE, or INSTANCE). Every OTHER key is a property written onto the new node exactly as edit_nodes writes a path — `name`, `x`, `y`, `cornerRadius`, `opacity`, `fills`, `layoutMode`, `paddingTop`, `itemSpacing`, etc. Values follow edit_nodes rules: any `color` field given as `#RRGGBB` is converted to Figma's rgb 0-1 (so `fills:[{type:\"SOLID\",color:\"#3366ff\"}]` works), `width`/`height` route through resize(), and on a TEXT node `characters` loads the node's font for you. Placement: `parentId` appends the node into an existing container (short ids n0,... or full Figma ids; default is the current page) and `index` sets its position among siblings. `children` is an array of the same spec shape, created recursively inside this node — this is how you write a whole subtree (frame → its rows → their text) in one call. Specs are INDEPENDENT like edit_nodes: a spec whose factory or parent lookup fails records its Figma error and the siblings still create; within a created node, a single bad property (e.g. padding with no layoutMode, a value Figma rejects) is reported per-property and the node still survives with its other props. INSTANCE needs `componentId` (a local COMPONENT, from get_local_components) or `componentKey` (a published library component). The result is a tree of `✓ <id> <TYPE> \"<name>\"` (use that id as a parentId or in edit_nodes next) or `✗ <error>`, with `! key: <error>` lines for any rejected properties. Large batches stream progress so a long run won't time out.",
   {
-    x: z.number().describe("X position"),
-    y: z.number().describe("Y position"),
-    width: z.number().describe("Width of the rectangle"),
-    height: z.number().describe("Height of the rectangle"),
-    name: z.string().optional().describe("Optional name for the rectangle"),
-    parentId: z
-      .string()
-      .optional()
-      .describe("Optional parent node ID to append the rectangle to"),
+    nodes: z
+      .array(z.record(z.any()))
+      .min(1)
+      .describe("Node specs, each `{type, ...props, children?}`. Created in order, independent — one failing does not abort the rest."),
   },
-  async ({ x, y, width, height, name, parentId }: any) => {
+  async ({ nodes }: any) => {
     try {
-      const result = await sendCommandToFigma("create_rectangle", {
-        x,
-        y,
-        width,
-        height,
-        name: name || "Rectangle",
-        parentId,
-      });
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Created rectangle "${JSON.stringify(result)}"`,
-          },
-        ],
+      const result: any = await sendCommandToFigma("write_nodes", { nodes });
+      const renumber = (id: string) => renumberIds({ id }).id;
+      const lines: string[] = [];
+      const walk = (arr: any[], depth: number) => {
+        for (const r of arr || []) {
+          const pad = "  ".repeat(depth);
+          lines.push(
+            r.ok
+              ? `${pad}✓ ${renumber(r.id)} ${r.type} "${r.name}"`
+              : `${pad}✗ ${r.type || "node"}: ${r.error}`
+          );
+          for (const pe of r.errors || []) lines.push(`${pad}  ! ${pe.key}: ${pe.error}`);
+          if (r.children && r.children.length) walk(r.children, depth + 1);
+        }
       };
+      walk(result?.results || [], 0);
+      const text = `created ${result?.created || 0}/${result?.total || 0}` + (lines.length ? "\n" + lines.join("\n") : "");
+      return { content: [{ type: "text", text }] };
     } catch (error) {
       return {
         content: [
           {
             type: "text",
-            text: `Error creating rectangle: ${error instanceof Error ? error.message : String(error)
-              }`,
-          },
-        ],
-      };
-    }
-  }
-);
-
-// Create Frame Tool
-server.tool(
-  "create_frame",
-  "Create a new frame in Figma",
-  {
-    x: z.number().describe("X position"),
-    y: z.number().describe("Y position"),
-    width: z.number().describe("Width of the frame"),
-    height: z.number().describe("Height of the frame"),
-    name: z.string().optional().describe("Optional name for the frame"),
-    parentId: z
-      .string()
-      .optional()
-      .describe("Optional parent node ID to append the frame to"),
-    fillColor: z
-      .object({
-        r: z.number().min(0).max(1).describe("Red component (0-1)"),
-        g: z.number().min(0).max(1).describe("Green component (0-1)"),
-        b: z.number().min(0).max(1).describe("Blue component (0-1)"),
-        a: z
-          .number()
-          .min(0)
-          .max(1)
-          .optional()
-          .describe("Alpha component (0-1)"),
-      })
-      .optional()
-      .describe("Fill color in RGBA format"),
-    strokeColor: z
-      .object({
-        r: z.number().min(0).max(1).describe("Red component (0-1)"),
-        g: z.number().min(0).max(1).describe("Green component (0-1)"),
-        b: z.number().min(0).max(1).describe("Blue component (0-1)"),
-        a: z
-          .number()
-          .min(0)
-          .max(1)
-          .optional()
-          .describe("Alpha component (0-1)"),
-      })
-      .optional()
-      .describe("Stroke color in RGBA format"),
-    strokeWeight: z.number().positive().optional().describe("Stroke weight"),
-    layoutMode: z.enum(["NONE", "HORIZONTAL", "VERTICAL"]).optional().describe("Auto-layout mode for the frame"),
-    layoutWrap: z.enum(["NO_WRAP", "WRAP"]).optional().describe("Whether the auto-layout frame wraps its children"),
-    paddingTop: z.number().optional().describe("Top padding for auto-layout frame"),
-    paddingRight: z.number().optional().describe("Right padding for auto-layout frame"),
-    paddingBottom: z.number().optional().describe("Bottom padding for auto-layout frame"),
-    paddingLeft: z.number().optional().describe("Left padding for auto-layout frame"),
-    primaryAxisAlignItems: z
-      .enum(["MIN", "MAX", "CENTER", "SPACE_BETWEEN"])
-      .optional()
-      .describe("Primary axis alignment for auto-layout frame. Note: When set to SPACE_BETWEEN, itemSpacing will be ignored as children will be evenly spaced."),
-    counterAxisAlignItems: z.enum(["MIN", "MAX", "CENTER", "BASELINE"]).optional().describe("Counter axis alignment for auto-layout frame"),
-    layoutSizingHorizontal: z.enum(["FIXED", "HUG", "FILL"]).optional().describe("Horizontal sizing mode for auto-layout frame"),
-    layoutSizingVertical: z.enum(["FIXED", "HUG", "FILL"]).optional().describe("Vertical sizing mode for auto-layout frame"),
-    itemSpacing: z
-      .number()
-      .optional()
-      .describe("Distance between children in auto-layout frame. Note: This value will be ignored if primaryAxisAlignItems is set to SPACE_BETWEEN.")
-  },
-  async ({
-    x,
-    y,
-    width,
-    height,
-    name,
-    parentId,
-    fillColor,
-    strokeColor,
-    strokeWeight,
-    layoutMode,
-    layoutWrap,
-    paddingTop,
-    paddingRight,
-    paddingBottom,
-    paddingLeft,
-    primaryAxisAlignItems,
-    counterAxisAlignItems,
-    layoutSizingHorizontal,
-    layoutSizingVertical,
-    itemSpacing
-  }: any) => {
-    try {
-      const result = await sendCommandToFigma("create_frame", {
-        x,
-        y,
-        width,
-        height,
-        name: name || "Frame",
-        parentId,
-        fillColor: fillColor || { r: 1, g: 1, b: 1, a: 1 },
-        strokeColor: strokeColor,
-        strokeWeight: strokeWeight,
-        layoutMode,
-        layoutWrap,
-        paddingTop,
-        paddingRight,
-        paddingBottom,
-        paddingLeft,
-        primaryAxisAlignItems,
-        counterAxisAlignItems,
-        layoutSizingHorizontal,
-        layoutSizingVertical,
-        itemSpacing
-      });
-      const typedResult = result as { name: string; id: string };
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Created frame "${typedResult.name}" with ID: ${typedResult.id}. Use the ID as the parentId to appendChild inside this frame.`,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error creating frame: ${error instanceof Error ? error.message : String(error)
-              }`,
-          },
-        ],
-      };
-    }
-  }
-);
-
-// Create Text Tool
-server.tool(
-  "create_text",
-  "Create a new text element in Figma",
-  {
-    x: z.number().describe("X position"),
-    y: z.number().describe("Y position"),
-    text: z.string().describe("Text content"),
-    fontSize: z.number().optional().describe("Font size (default: 14)"),
-    fontWeight: z
-      .number()
-      .optional()
-      .describe("Font weight (e.g., 400 for Regular, 700 for Bold)"),
-    fontColor: z
-      .object({
-        r: z.number().min(0).max(1).describe("Red component (0-1)"),
-        g: z.number().min(0).max(1).describe("Green component (0-1)"),
-        b: z.number().min(0).max(1).describe("Blue component (0-1)"),
-        a: z
-          .number()
-          .min(0)
-          .max(1)
-          .optional()
-          .describe("Alpha component (0-1)"),
-      })
-      .optional()
-      .describe("Font color in RGBA format"),
-    name: z
-      .string()
-      .optional()
-      .describe("Semantic layer name for the text node"),
-    parentId: z
-      .string()
-      .optional()
-      .describe("Optional parent node ID to append the text to"),
-  },
-  async ({ x, y, text, fontSize, fontWeight, fontColor, name, parentId }: any) => {
-    try {
-      const result = await sendCommandToFigma("create_text", {
-        x,
-        y,
-        text,
-        fontSize: fontSize || 14,
-        fontWeight: fontWeight || 400,
-        fontColor: fontColor || { r: 0, g: 0, b: 0, a: 1 },
-        name: name || "Text",
-        parentId,
-      });
-      const typedResult = result as { name: string; id: string };
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Created text "${typedResult.name}" with ID: ${typedResult.id}`,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error creating text: ${error instanceof Error ? error.message : String(error)
-              }`,
+            text: `Error writing nodes: ${error instanceof Error ? error.message : String(error)}`,
           },
         ],
       };
@@ -1478,49 +1173,6 @@ server.tool(
   }
 );
 
-// Create Component Instance Tool
-server.tool(
-  "create_component_instance",
-  "Create an instance of a component in Figma. For LOCAL components (from get_local_components), use componentId with the id field. For published LIBRARY components, use componentKey with the publishedKey field.",
-  {
-    componentId: z.string().optional().describe("ID of a local component (use the id field from get_local_components result). Use this for unpublished/local components."),
-    componentKey: z.string().optional().describe("Key of a published library component to instantiate (use the publishedKey field from get_local_components result). Only works for published components."),
-    x: z.number().describe("X position"),
-    y: z.number().describe("Y position"),
-    parentId: z.string().optional().describe("Optional parent node ID to place the instance into"),
-  },
-  async ({ componentId, componentKey, x, y, parentId }: any) => {
-    try {
-      const result = await sendCommandToFigma("create_component_instance", {
-        componentId,
-        componentKey,
-        x,
-        y,
-        parentId,
-      });
-      const typedResult = result as any;
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(typedResult),
-          }
-        ]
-      }
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error creating component instance: ${error instanceof Error ? error.message : String(error)
-              }`,
-          },
-        ],
-      };
-    }
-  }
-);
-
 // Copy Instance Overrides Tool
 server.tool(
   "get_instance_overrides",
@@ -1646,12 +1298,11 @@ server.prompt(
    - Group related inputs (e.g., username/password) together
 
 5. Element Creation:
-   - Use create_frame() for containers and input fields
-   - Use create_text() for labels, buttons text, and links
-   - Set appropriate colors and styles:
-     * Use fillColor for backgrounds
-     * Use strokeColor for borders
-     * Set proper fontWeight for different text elements
+   - Use write_nodes() to create the whole subtree at once: a FRAME spec for each container/input field with nested children TEXT specs for labels, button text, and links
+   - Set appropriate colors and styles inline on each spec:
+     * fills for backgrounds (color as hex #RRGGBB)
+     * strokes for borders
+     * fontName/fontSize for different text elements
 
 6. Mofifying existing elements:
   - use edit_nodes() to modify properties (text via the "characters" path, colors, layout, etc.).
@@ -2342,16 +1993,13 @@ type FigmaCommand =
   | "get_selection"
   | "get_node_info"
   | "get_node_info_raw"
-  | "create_rectangle"
-  | "create_frame"
-  | "create_text"
+  | "write_nodes"
   | "set_fill_color"
   | "set_stroke_color"
   | "delete_node"
   | "delete_multiple_nodes"
   | "get_styles"
   | "get_local_components"
-  | "create_component_instance"
   | "get_instance_overrides"
   | "set_instance_overrides"
   | "export_node_as_image"
@@ -2375,34 +2023,8 @@ type CommandParams = {
   get_selection: Record<string, never>;
   get_node_info: { nodeId: string };
   get_node_info_raw: { nodeId: string };
-  create_rectangle: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    name?: string;
-    parentId?: string;
-  };
-  create_frame: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    name?: string;
-    parentId?: string;
-    fillColor?: { r: number; g: number; b: number; a?: number };
-    strokeColor?: { r: number; g: number; b: number; a?: number };
-    strokeWeight?: number;
-  };
-  create_text: {
-    x: number;
-    y: number;
-    text: string;
-    fontSize?: number;
-    fontWeight?: number;
-    fontColor?: { r: number; g: number; b: number; a?: number };
-    name?: string;
-    parentId?: string;
+  write_nodes: {
+    nodes: Array<Record<string, any>>;
   };
   set_fill_color: {
     nodeId: string;
@@ -2428,11 +2050,6 @@ type CommandParams = {
   get_styles: Record<string, never>;
   get_local_components: Record<string, never>;
   get_team_components: Record<string, never>;
-  create_component_instance: {
-    componentKey: string;
-    x: number;
-    y: number;
-  };
   get_instance_overrides: {
     instanceNodeId: string | null;
   };

@@ -151,12 +151,8 @@ async function handleCommand(command, params) {
         throw new Error("Missing nodeId parameter");
       }
       return await getNodeInfoRaw(params.nodeId);
-    case "create_rectangle":
-      return await createRectangle(params);
-    case "create_frame":
-      return await createFrame(params);
-    case "create_text":
-      return await createText(params);
+    case "write_nodes":
+      return await writeNodes(params);
     case "edit_nodes":
       return await editNodes(params);
     case "set_fill_color":
@@ -173,8 +169,6 @@ async function handleCommand(command, params) {
       return await getLocalComponents(params);
     // case "get_team_components":
     //   return await getTeamComponents();
-    case "create_component_instance":
-      return await createComponentInstance(params);
     case "export_node_as_image":
       return await exportNodeAsImage(params);
     case "clone_node":
@@ -654,258 +648,209 @@ async function getReactions(nodeIds) {
   }
 }
 
-async function createRectangle(params) {
-  const {
-    x = 0,
-    y = 0,
-    width = 100,
-    height = 100,
-    name = "Rectangle",
-    parentId,
-  } = params || {};
-
-  const rect = figma.createRectangle();
-  rect.x = x;
-  rect.y = y;
-  rect.resize(width, height);
-  rect.name = name;
-
-  // If parentId is provided, append to that node, otherwise append to current page
-  if (parentId) {
-    const parentNode = await figma.getNodeByIdAsync(parentId);
-    if (!parentNode) {
-      throw new Error(`Parent node not found with ID: ${parentId}`);
-    }
-    if (!("appendChild" in parentNode)) {
-      throw new Error(`Parent node does not support children: ${parentId}`);
-    }
-    parentNode.appendChild(rect);
-  } else {
-    figma.currentPage.appendChild(rect);
+// @ai-generated(solo)
+// Create-side twin of editNodes: build new nodes from raw Figma JSON specs.
+// Each spec is { type, ...props, children? }. Specs and children are independent
+// — a failing one records its Figma error without aborting the rest — and large
+// batches stream progress so a long run won't trip the 30s command timeout.
+async function writeNodes(params) {
+  const { nodes } = params || {};
+  if (!Array.isArray(nodes) || nodes.length === 0) {
+    throw new Error("write_nodes requires a non-empty `nodes` array");
   }
 
-  return {
-    id: rect.id,
-    name: rect.name,
-    x: rect.x,
-    y: rect.y,
-    width: rect.width,
-    height: rect.height,
-    parentId: rect.parent ? rect.parent.id : undefined,
-  };
+  const counts = { created: 0, total: 0 };
+  const commandId = (params && params.commandId) || generateCommandId();
+  // Top-level spec count is a lower bound on work; good enough to decide whether
+  // to bother streaming (subtrees only push the real total higher).
+  const reportProgress = nodes.length > 3;
+  if (reportProgress) {
+    await sendProgressUpdate(commandId, "write_nodes", "started", 0, nodes.length, 0, `Creating ${nodes.length} nodes...`);
+  }
+
+  const results = [];
+  for (let i = 0; i < nodes.length; i++) {
+    results.push(await createOneNode(nodes[i], figma.currentPage, counts));
+    if (reportProgress && i + 1 < nodes.length) {
+      await sendProgressUpdate(
+        commandId, "write_nodes", "in_progress",
+        Math.round(((i + 1) / nodes.length) * 100), nodes.length, i + 1,
+        `Created ${counts.created} nodes (${i + 1}/${nodes.length} roots)`
+      );
+    }
+  }
+
+  if (reportProgress) {
+    await sendProgressUpdate(commandId, "write_nodes", "completed", 100, nodes.length, nodes.length, `Done: ${counts.created} nodes created`);
+  }
+
+  return { created: counts.created, total: counts.total, results };
 }
 
-async function createFrame(params) {
-  const {
-    x = 0,
-    y = 0,
-    width = 100,
-    height = 100,
-    name = "Frame",
-    parentId,
-    fillColor,
-    strokeColor,
-    strokeWeight,
-    layoutMode = "NONE",
-    layoutWrap = "NO_WRAP",
-    paddingTop = 10,
-    paddingRight = 10,
-    paddingBottom = 10,
-    paddingLeft = 10,
-    primaryAxisAlignItems = "MIN",
-    counterAxisAlignItems = "MIN",
-    layoutSizingHorizontal = "FIXED",
-    layoutSizingVertical = "FIXED",
-    itemSpacing = 0,
-  } = params || {};
+const NODE_FACTORIES = {
+  RECTANGLE: () => figma.createRectangle(),
+  FRAME: () => figma.createFrame(),
+  TEXT: () => figma.createText(),
+  ELLIPSE: () => figma.createEllipse(),
+  LINE: () => figma.createLine(),
+  STAR: () => figma.createStar(),
+  POLYGON: () => figma.createPolygon(),
+  VECTOR: () => figma.createVector(),
+  COMPONENT: () => figma.createComponent(),
+  SECTION: () => figma.createSection(),
+  SLICE: () => figma.createSlice(),
+};
 
-  const frame = figma.createFrame();
-  frame.x = x;
-  frame.y = y;
-  frame.resize(width, height);
-  frame.name = name;
+// Keys consumed by the spec itself rather than written onto the node.
+const WRITE_RESERVED = new Set(["type", "parentId", "index", "children", "id", "componentId", "componentKey"]);
 
-  // Set layout mode if provided
-  if (layoutMode !== "NONE") {
-    frame.layoutMode = layoutMode;
-    frame.layoutWrap = layoutWrap;
-
-    // Set padding values only when layoutMode is not NONE
-    frame.paddingTop = paddingTop;
-    frame.paddingRight = paddingRight;
-    frame.paddingBottom = paddingBottom;
-    frame.paddingLeft = paddingLeft;
-
-    // Set axis alignment only when layoutMode is not NONE
-    frame.primaryAxisAlignItems = primaryAxisAlignItems;
-    frame.counterAxisAlignItems = counterAxisAlignItems;
-
-    // Set layout sizing only when layoutMode is not NONE
-    frame.layoutSizingHorizontal = layoutSizingHorizontal;
-    frame.layoutSizingVertical = layoutSizingVertical;
-
-    // Set item spacing only when layoutMode is not NONE
-    frame.itemSpacing = itemSpacing;
+// Apply structural props before cosmetic ones: a font must load before its
+// glyphs, layoutMode must exist before padding/spacing it gates, and characters
+// goes last so it picks up the resolved font.
+function writePropWeight(k) {
+  switch (k) {
+    case "fontName": return 0;
+    case "fontSize": return 1;
+    case "layoutMode": return 2;
+    case "layoutWrap": return 3;
+    case "characters": return 99;
+    default: return 50;
   }
-
-  // Set fill color if provided
-  if (fillColor) {
-    const paintStyle = {
-      type: "SOLID",
-      color: {
-        r: parseFloat(fillColor.r) || 0,
-        g: parseFloat(fillColor.g) || 0,
-        b: parseFloat(fillColor.b) || 0,
-      },
-      opacity: parseFloat(fillColor.a) || 1,
-    };
-    frame.fills = [paintStyle];
-  }
-
-  // Set stroke color and weight if provided
-  if (strokeColor) {
-    const strokeStyle = {
-      type: "SOLID",
-      color: {
-        r: parseFloat(strokeColor.r) || 0,
-        g: parseFloat(strokeColor.g) || 0,
-        b: parseFloat(strokeColor.b) || 0,
-      },
-      opacity: parseFloat(strokeColor.a) || 1,
-    };
-    frame.strokes = [strokeStyle];
-  }
-
-  // Set stroke weight if provided
-  if (strokeWeight !== undefined) {
-    frame.strokeWeight = strokeWeight;
-  }
-
-  // If parentId is provided, append to that node, otherwise append to current page
-  if (parentId) {
-    const parentNode = await figma.getNodeByIdAsync(parentId);
-    if (!parentNode) {
-      throw new Error(`Parent node not found with ID: ${parentId}`);
-    }
-    if (!("appendChild" in parentNode)) {
-      throw new Error(`Parent node does not support children: ${parentId}`);
-    }
-    parentNode.appendChild(frame);
-  } else {
-    figma.currentPage.appendChild(frame);
-  }
-
-  return {
-    id: frame.id,
-    name: frame.name,
-    x: frame.x,
-    y: frame.y,
-    width: frame.width,
-    height: frame.height,
-    fills: frame.fills,
-    strokes: frame.strokes,
-    strokeWeight: frame.strokeWeight,
-    layoutMode: frame.layoutMode,
-    layoutWrap: frame.layoutWrap,
-    parentId: frame.parent ? frame.parent.id : undefined,
-  };
 }
 
-async function createText(params) {
-  const {
-    x = 0,
-    y = 0,
-    text = "Text",
-    fontSize = 14,
-    fontWeight = 400,
-    fontColor = { r: 0, g: 0, b: 0, a: 1 }, // Default to black
-    name = "",
-    parentId,
-  } = params || {};
-
-  // Map common font weights to Figma font styles
-  const getFontStyle = (weight) => {
-    switch (weight) {
-      case 100:
-        return "Thin";
-      case 200:
-        return "Extra Light";
-      case 300:
-        return "Light";
-      case 400:
-        return "Regular";
-      case 500:
-        return "Medium";
-      case 600:
-        return "Semi Bold";
-      case 700:
-        return "Bold";
-      case 800:
-        return "Extra Bold";
-      case 900:
-        return "Black";
-      default:
-        return "Regular";
+// Recurse hex `color` leaves into Figma rgb 0-1, mirroring edit_nodes' convertWriteValue
+// but reaching colors nested inside paint arrays (fills/strokes).
+function coerceColors(val) {
+  if (Array.isArray(val)) return val.map(coerceColors);
+  if (val && typeof val === "object") {
+    const out = {};
+    for (const k in val) {
+      if (k === "color" && typeof val[k] === "string" && /^#[0-9a-fA-F]{3,8}$/.test(val[k])) {
+        const rgb = hexToRgb01(val[k]);
+        if (!rgb) throw new Error(`invalid hex color "${val[k]}"`);
+        out.color = { r: rgb.r, g: rgb.g, b: rgb.b };
+        // Hex alpha maps to the paint's opacity unless the spec set one explicitly.
+        if (typeof rgb.a === "number" && rgb.a !== 1 && val.opacity === undefined) out.opacity = rgb.a;
+      } else {
+        out[k] = coerceColors(val[k]);
+      }
     }
-  };
+    return out;
+  }
+  return val;
+}
 
-  const textNode = figma.createText();
-  textNode.x = x;
-  textNode.y = y;
-  textNode.name = name || text;
+async function setWriteProp(node, key, value) {
+  if (key === "characters") {
+    if (node.type !== "TEXT") throw new Error(`characters can only be set on TEXT nodes, not ${node.type}`);
+    await setCharacters(node, String(value)); // loads the node's font (with fallback) itself
+    return;
+  }
+  if (key === "fontName") {
+    await figma.loadFontAsync(value); // throws on an unavailable family/style — surfaced to the agent
+    node.fontName = value;
+    return;
+  }
+  if (key === "fontSize" && node.type === "TEXT" && node.fontName && node.fontName !== figma.mixed) {
+    await figma.loadFontAsync(node.fontName);
+  }
+  node[key] = coerceColors(value);
+}
+
+// Build one node and its subtree. Hard failures (bad type, missing parent,
+// uninstantiable component) reject the whole spec; a single rejected property
+// is recorded in `errors` and the node survives with its other props.
+async function createOneNode(spec, fallbackParent, counts) {
+  counts.total++;
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) {
+    return { ok: false, type: undefined, error: "node spec must be an object" };
+  }
+  const type = String(spec.type || "").toUpperCase();
+
+  let node;
   try {
-    await figma.loadFontAsync({
-      family: "Inter",
-      style: getFontStyle(fontWeight),
-    });
-    textNode.fontName = { family: "Inter", style: getFontStyle(fontWeight) };
-    textNode.fontSize = parseInt(fontSize);
-  } catch (error) {
-    console.error("Error setting font size", error);
-  }
-  setCharacters(textNode, text);
-
-  // Set text color
-  const paintStyle = {
-    type: "SOLID",
-    color: {
-      r: parseFloat(fontColor.r) || 0,
-      g: parseFloat(fontColor.g) || 0,
-      b: parseFloat(fontColor.b) || 0,
-    },
-    opacity: parseFloat(fontColor.a) || 1,
-  };
-  textNode.fills = [paintStyle];
-
-  // If parentId is provided, append to that node, otherwise append to current page
-  if (parentId) {
-    const parentNode = await figma.getNodeByIdAsync(parentId);
-    if (!parentNode) {
-      throw new Error(`Parent node not found with ID: ${parentId}`);
+    if (!type) throw new Error("node spec needs a `type`");
+    if (type === "INSTANCE") {
+      node = await instantiateComponent(spec);
+    } else {
+      const make = NODE_FACTORIES[type];
+      if (!make) throw new Error(`unsupported node type "${type}"`);
+      node = make();
     }
-    if (!("appendChild" in parentNode)) {
-      throw new Error(`Parent node does not support children: ${parentId}`);
+
+    // Resolve placement, then append before writing props so layout-relative
+    // props (layoutSizing FILL/HUG, index) resolve against the real parent.
+    let parent = fallbackParent || figma.currentPage;
+    if (spec.parentId) {
+      const p = await figma.getNodeByIdAsync(spec.parentId);
+      if (!p) throw new Error(`parent not found: ${spec.parentId}`);
+      if (!("appendChild" in p)) throw new Error(`parent ${spec.parentId} cannot have children`);
+      parent = p;
     }
-    parentNode.appendChild(textNode);
-  } else {
-    figma.currentPage.appendChild(textNode);
+    if (typeof spec.index === "number" && "insertChild" in parent) parent.insertChild(spec.index, node);
+    else parent.appendChild(node);
+  } catch (err) {
+    if (node) node.remove(); // don't leave an orphan from a half-done create
+    return { ok: false, type: type || undefined, error: err && err.message ? err.message : String(err) };
   }
 
-  return {
-    id: textNode.id,
-    name: textNode.name,
-    x: textNode.x,
-    y: textNode.y,
-    width: textNode.width,
-    height: textNode.height,
-    characters: textNode.characters,
-    fontSize: textNode.fontSize,
-    fontWeight: fontWeight,
-    fontColor: fontColor,
-    fontName: textNode.fontName,
-    fills: textNode.fills,
-    parentId: textNode.parent ? textNode.parent.id : undefined,
-  };
+  const propErrors = [];
+
+  // width/height go through resize() together, not assignment.
+  if ("width" in spec || "height" in spec) {
+    try {
+      if (!("resize" in node)) throw new Error(`${node.type} does not support resizing`);
+      const w = spec.width != null ? Number(spec.width) : node.width;
+      const h = spec.height != null ? Number(spec.height) : node.height;
+      node.resize(w, h);
+    } catch (err) {
+      propErrors.push({ key: "width/height", error: err && err.message ? err.message : String(err) });
+    }
+  }
+
+  const keys = Object.keys(spec)
+    .filter((k) => !WRITE_RESERVED.has(k) && k !== "width" && k !== "height")
+    .sort((a, b) => writePropWeight(a) - writePropWeight(b));
+  for (const key of keys) {
+    try {
+      await setWriteProp(node, key, spec[key]);
+    } catch (err) {
+      propErrors.push({ key, error: err && err.message ? err.message : String(err) });
+    }
+  }
+
+  counts.created++;
+  const result = { ok: true, id: node.id, type: node.type, name: node.name };
+  if (propErrors.length) result.errors = propErrors;
+
+  if (Array.isArray(spec.children) && spec.children.length) {
+    if (!("appendChild" in node)) {
+      result.errors = (result.errors || []).concat({ key: "children", error: `${node.type} cannot have children` });
+    } else {
+      result.children = [];
+      for (const child of spec.children) {
+        result.children.push(await createOneNode(child, node, counts));
+      }
+    }
+  }
+  return result;
+}
+
+// Resolve an INSTANCE spec's source component (local id or published key) and
+// instantiate it; the generic flow then appends and writes its props.
+async function instantiateComponent(spec) {
+  const { componentId, componentKey } = spec;
+  if (!componentId && !componentKey) {
+    throw new Error("INSTANCE needs `componentId` (local component) or `componentKey` (published library component)");
+  }
+  if (componentId) {
+    const n = await figma.getNodeByIdAsync(componentId);
+    if (!n) throw new Error(`component not found: ${componentId}`);
+    if (n.type !== "COMPONENT") throw new Error(`node ${componentId} is ${n.type}, not a COMPONENT`);
+    return n.createInstance();
+  }
+  const component = await figma.importComponentByKeyAsync(componentKey);
+  return component.createInstance();
 }
 
 async function setFillColor(params) {
@@ -1152,62 +1097,6 @@ async function getLocalComponents(params) {
 //     throw new Error(`Error getting team components: ${error.message}`);
 //   }
 // }
-
-async function createComponentInstance(params) {
-  const { componentKey, componentId, x = 0, y = 0, parentId } = params || {};
-
-  if (!componentKey && !componentId) {
-    throw new Error("Missing componentKey or componentId parameter. Use componentId for local components (from get_local_components), or componentKey for published library components.");
-  }
-
-  try {
-    let component;
-
-    if (componentId) {
-      // Local component: get node directly by ID
-      const node = await figma.getNodeByIdAsync(componentId);
-      if (!node) {
-        throw new Error(`Component node not found with id: ${componentId}`);
-      }
-      if (node.type !== "COMPONENT") {
-        throw new Error(`Node ${componentId} is not a COMPONENT (got type: ${node.type}). Use get_local_components to find valid component IDs.`);
-      }
-      component = node;
-    } else {
-      // Published library component: import by key
-      component = await figma.importComponentByKeyAsync(componentKey);
-    }
-
-    const instance = component.createInstance();
-    instance.x = x;
-    instance.y = y;
-
-    if (parentId) {
-      const parent = await figma.getNodeByIdAsync(parentId);
-      if (parent && "appendChild" in parent) {
-        parent.appendChild(instance);
-      } else {
-        figma.currentPage.appendChild(instance);
-      }
-    } else {
-      figma.currentPage.appendChild(instance);
-    }
-
-    const mainComponent = await instance.getMainComponentAsync();
-
-    return {
-      id: instance.id,
-      name: instance.name,
-      x: instance.x,
-      y: instance.y,
-      width: instance.width,
-      height: instance.height,
-      mainComponentId: mainComponent ? mainComponent.id : undefined,
-    };
-  } catch (error) {
-    throw new Error(`Error creating component instance: ${error.message}`);
-  }
-}
 
 async function exportNodeAsImage(params) {
   const { nodeId, scale = 1 } = params || {};
