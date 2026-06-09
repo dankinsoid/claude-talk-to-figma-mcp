@@ -466,7 +466,25 @@ async function readNode(nodeId) {
     format: "JSON_REST_V1",
   });
 
-  return filterFigmaNode(response.document);
+  const filtered = filterFigmaNode(response.document);
+
+  // Ancestor breadcrumb: the export gives the subtree (downward) but nothing
+  // about what contains this node, so a caller that lands here can't tell where
+  // it sits without a separate glob. Walk the live node's parents up to the page
+  // and attach a root-first chain (page → ... → immediate parent). One small
+  // array on the root only — children already carry their own @parent via glob.
+  if (filtered) {
+    const ancestors = [];
+    let p = node.parent;
+    while (p && p.type !== "DOCUMENT") {
+      ancestors.unshift({ id: p.id, name: p.name, type: p.type });
+      if (p.type === "PAGE") break;
+      p = p.parent;
+    }
+    if (ancestors.length) filtered.ancestors = ancestors;
+  }
+
+  return filtered;
 }
 
 // Full, unfiltered JSON_REST_V1 serialization of a single node, with the

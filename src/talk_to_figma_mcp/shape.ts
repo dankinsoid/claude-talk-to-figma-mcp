@@ -489,5 +489,9 @@ export function shapeNode(node: any, options: ShapeOptions = {}): any {
   };
   const { collapsed, templates } = planRepeats(node, opts.collapseRepeats);
   const expand = planExpansion(node, opts, collapsed);
-  return shapeRec(node, opts, 0, null, expand, collapsed, templates, null);
+  const out = shapeRec(node, opts, 0, null, expand, collapsed, templates, null);
+  // Upward context the plugin attached to the requested root (not to children).
+  // renumberIds shortens these ids too, so they feed straight back into tools.
+  if (node.ancestors) out.ancestors = node.ancestors;
+  return out;
 }
