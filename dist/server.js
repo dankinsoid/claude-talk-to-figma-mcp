@@ -2938,6 +2938,57 @@ server.tool(
   }
 );
 server.tool(
+  "style_text_range",
+  "Apply per-character-range styling to a TEXT node \u2014 the mixed-style edits edit_nodes can't express, since a node-level setter writes the whole text. Each entry is a [start, end) character span (start inclusive, end exclusive) with one or more style props; only the props you pass on that span are changed. Fonts for the affected ranges are loaded automatically. Read the node's current runs first via read_node_raw \u2192 `styledTextSegments`. `hyperlink`: pass a URL string (or {type:'URL'|'NODE', value}) to set it, or null to clear it. Colors in `fills` accept #RRGGBB.",
+  {
+    nodeId: z4.string().describe("The TEXT node to style"),
+    ranges: z4.array(
+      z4.object({
+        start: z4.number().describe("Start character index (inclusive)"),
+        end: z4.number().describe("End character index (exclusive)"),
+        fontName: z4.object({ family: z4.string(), style: z4.string() }).optional().describe("Font for this range (loaded automatically). Use list_fonts to get valid family/style."),
+        fontSize: z4.number().optional(),
+        fills: z4.array(z4.any()).optional().describe("Paint array; a paint's color accepts #RRGGBB"),
+        textCase: z4.enum(["ORIGINAL", "UPPER", "LOWER", "TITLE", "SMALL_CAPS", "SMALL_CAPS_FORCED"]).optional(),
+        textDecoration: z4.enum(["NONE", "UNDERLINE", "STRIKETHROUGH"]).optional(),
+        letterSpacing: z4.any().optional().describe("Number (px shorthand) or {value, unit}"),
+        lineHeight: z4.any().optional().describe("Number (px shorthand) or {value, unit:'PIXELS'|'PERCENT'} or {unit:'AUTO'}"),
+        hyperlink: z4.any().optional().describe("URL string, {type,value}, or null to clear"),
+        listOptions: z4.object({ type: z4.enum(["ORDERED", "UNORDERED", "NONE"]) }).optional(),
+        indentation: z4.number().optional(),
+        textStyleId: z4.string().optional().describe("Apply a shared text style by id"),
+        fillStyleId: z4.string().optional().describe("Apply a shared paint/fill style by id")
+      })
+    ).min(1).describe("Character ranges to style")
+  },
+  async ({ nodeId, ranges }) => {
+    try {
+      const result = await sendCommandToFigma("style_text_range", { nodeId, ranges });
+      const lines = (result.ranges || []).map(
+        (r) => `[${r.start},${r.end}) \u2192 ${(r.applied || []).join(", ") || "no-op"}`
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Styled ${result.ranges.length} range(s) on ${result.nodeId} (text length ${result.length}):
+${lines.join("\n")}`
+          }
+        ]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error styling text range: ${error instanceof Error ? error.message : String(error)}`
+          }
+        ]
+      };
+    }
+  }
+);
+server.tool(
   "edit_groups",
   "Group or ungroup nodes. `group` wraps 2+ nodes in a new GROUP (placed in the first node's current parent unless `parentId` is given). `ungroup` dissolves each GROUP/FRAME in `nodeIds` back into its parent and returns the freed children with their new IDs (ungroup reparents, so IDs change). A GROUP is a lightweight container with no layout/clipping of its own \u2014 use a FRAME (via write_nodes) when you need auto-layout, padding, or clipping.",
   {

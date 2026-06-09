@@ -292,6 +292,8 @@ async function handleCommand(command, params) {
       return await transformNodes(params);
     case "list_fonts":
       return await listFonts(params);
+    case "style_text_range":
+      return await styleTextRange(params);
     default:
       throw new Error(`Unknown command: ${command}`);
   }
@@ -540,6 +542,32 @@ async function readNodeRaw(nodeId) {
 
   const document = response.document;
   delete document.children;
+
+  // JSON_REST_V1 encodes per-range text styling as characterStyleOverrides +
+  // styleOverrideTable, which is painful to map back to character ranges. Attach
+  // the clean live segments (each a [start,end) run with its resolved style) so
+  // the agent can see what to target with style_text_range.
+  if (node.type === "TEXT") {
+    try {
+      document.styledTextSegments = node.getStyledTextSegments([
+        "fontName",
+        "fontSize",
+        "fills",
+        "fillStyleId",
+        "textStyleId",
+        "textCase",
+        "textDecoration",
+        "letterSpacing",
+        "lineHeight",
+        "hyperlink",
+        "listOptions",
+        "indentation",
+      ]);
+    } catch (err) {
+      document.styledTextSegmentsError = String((err && err.message) || err);
+    }
+  }
+
   return document;
 }
 
@@ -3757,6 +3785,72 @@ async function listFonts(params) {
     truncated: allFamilies.length > families.length,
     families,
   };
+}
+
+// Apply per-character-range text styling that whole-node setters (edit_nodes)
+// can't express: in Figma a TextNode's fontName/fontSize/fills/etc can vary per
+// range, and are set only via setRange* methods, not assignable properties.
+// CRITICAL: every setRange* throws if the range it touches contains an unloaded
+// font, so we load all fonts currently in the node (plus any a range introduces)
+// before touching anything.
+async function styleTextRange(params) {
+  const { nodeId, ranges } = params || {};
+  if (!nodeId) throw new Error("style_text_range requires `nodeId`");
+  const node = await figma.getNodeByIdAsync(nodeId);
+  if (!node) throw new Error(`Node not found: ${nodeId}`);
+  if (node.type !== "TEXT") {
+    throw new Error(`style_text_range requires a TEXT node, not ${node.type}`);
+  }
+  if (!Array.isArray(ranges) || ranges.length === 0) {
+    throw new Error("style_text_range requires a non-empty `ranges` array");
+  }
+
+  const len = node.characters.length;
+
+  // Load every font already used in the node, then any new font a range brings in.
+  for (const f of node.getRangeAllFontNames(0, len)) await figma.loadFontAsync(f);
+  for (const r of ranges) {
+    if (r && r.fontName) await figma.loadFontAsync(r.fontName);
+  }
+
+  const results = [];
+  for (let i = 0; i < ranges.length; i++) {
+    const r = ranges[i] || {};
+    const { start, end } = r;
+    if (typeof start !== "number" || typeof end !== "number") {
+      throw new Error(`ranges[${i}] needs numeric \`start\` and \`end\``);
+    }
+    if (start < 0 || end > len || start >= end) {
+      throw new Error(`ranges[${i}] (${start}..${end}) out of bounds for text length ${len}`);
+    }
+
+    const applied = [];
+    if (r.fontName !== undefined) { node.setRangeFontName(start, end, r.fontName); applied.push("fontName"); }
+    if (r.fontSize !== undefined) { node.setRangeFontSize(start, end, r.fontSize); applied.push("fontSize"); }
+    if (r.fills !== undefined) { node.setRangeFills(start, end, coerceColors(r.fills)); applied.push("fills"); }
+    if (r.textCase !== undefined) { node.setRangeTextCase(start, end, r.textCase); applied.push("textCase"); }
+    if (r.textDecoration !== undefined) { node.setRangeTextDecoration(start, end, r.textDecoration); applied.push("textDecoration"); }
+    if (r.letterSpacing !== undefined) { node.setRangeLetterSpacing(start, end, coerceTypedUnit("letterSpacing", r.letterSpacing)); applied.push("letterSpacing"); }
+    if (r.lineHeight !== undefined) { node.setRangeLineHeight(start, end, coerceTypedUnit("lineHeight", r.lineHeight)); applied.push("lineHeight"); }
+    if (r.hyperlink !== undefined) {
+      // null clears the link; a bare string is shorthand for {type:"URL", value}.
+      const hl = r.hyperlink === null
+        ? null
+        : typeof r.hyperlink === "string"
+          ? { type: "URL", value: r.hyperlink }
+          : r.hyperlink;
+      node.setRangeHyperlink(start, end, hl);
+      applied.push("hyperlink");
+    }
+    if (r.listOptions !== undefined) { node.setRangeListOptions(start, end, r.listOptions); applied.push("listOptions"); }
+    if (r.indentation !== undefined) { node.setRangeIndentation(start, end, r.indentation); applied.push("indentation"); }
+    if (r.textStyleId !== undefined) { await node.setRangeTextStyleIdAsync(start, end, r.textStyleId); applied.push("textStyleId"); }
+    if (r.fillStyleId !== undefined) { await node.setRangeFillStyleIdAsync(start, end, r.fillStyleId); applied.push("fillStyleId"); }
+
+    results.push({ start, end, applied });
+  }
+
+  return { success: true, nodeId: node.id, length: len, ranges: results };
 }
 
 // Group/ungroup, the inverse halves of one operation.

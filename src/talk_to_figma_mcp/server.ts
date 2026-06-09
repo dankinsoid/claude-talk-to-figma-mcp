@@ -2181,6 +2181,69 @@ server.tool(
   }
 );
 
+// Per-character-range text styling (the mixed-style edits edit_nodes can't do)
+server.tool(
+  "style_text_range",
+  "Apply per-character-range styling to a TEXT node — the mixed-style edits edit_nodes can't express, since a node-level setter writes the whole text. Each entry is a [start, end) character span (start inclusive, end exclusive) with one or more style props; only the props you pass on that span are changed. Fonts for the affected ranges are loaded automatically. Read the node's current runs first via read_node_raw → `styledTextSegments`. `hyperlink`: pass a URL string (or {type:'URL'|'NODE', value}) to set it, or null to clear it. Colors in `fills` accept #RRGGBB.",
+  {
+    nodeId: z.string().describe("The TEXT node to style"),
+    ranges: z
+      .array(
+        z.object({
+          start: z.number().describe("Start character index (inclusive)"),
+          end: z.number().describe("End character index (exclusive)"),
+          fontName: z
+            .object({ family: z.string(), style: z.string() })
+            .optional()
+            .describe("Font for this range (loaded automatically). Use list_fonts to get valid family/style."),
+          fontSize: z.number().optional(),
+          fills: z.array(z.any()).optional().describe("Paint array; a paint's color accepts #RRGGBB"),
+          textCase: z
+            .enum(["ORIGINAL", "UPPER", "LOWER", "TITLE", "SMALL_CAPS", "SMALL_CAPS_FORCED"])
+            .optional(),
+          textDecoration: z.enum(["NONE", "UNDERLINE", "STRIKETHROUGH"]).optional(),
+          letterSpacing: z.any().optional().describe("Number (px shorthand) or {value, unit}"),
+          lineHeight: z
+            .any()
+            .optional()
+            .describe("Number (px shorthand) or {value, unit:'PIXELS'|'PERCENT'} or {unit:'AUTO'}"),
+          hyperlink: z.any().optional().describe("URL string, {type,value}, or null to clear"),
+          listOptions: z.object({ type: z.enum(["ORDERED", "UNORDERED", "NONE"]) }).optional(),
+          indentation: z.number().optional(),
+          textStyleId: z.string().optional().describe("Apply a shared text style by id"),
+          fillStyleId: z.string().optional().describe("Apply a shared paint/fill style by id"),
+        })
+      )
+      .min(1)
+      .describe("Character ranges to style"),
+  },
+  async ({ nodeId, ranges }: any) => {
+    try {
+      const result: any = await sendCommandToFigma("style_text_range", { nodeId, ranges });
+      const lines = (result.ranges || []).map(
+        (r: any) => `[${r.start},${r.end}) → ${(r.applied || []).join(", ") || "no-op"}`
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Styled ${result.ranges.length} range(s) on ${result.nodeId} (text length ${result.length}):\n${lines.join("\n")}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error styling text range: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
 // Group / ungroup nodes
 server.tool(
   "edit_groups",
@@ -2562,6 +2625,7 @@ type FigmaCommand =
   | "boolean_operation"
   | "transform_nodes"
   | "list_fonts"
+  | "style_text_range"
   | "edit_groups"
   | "write_table"
   | "edit_table"
@@ -2695,6 +2759,25 @@ type CommandParams = {
   list_fonts: {
     query?: string;
     limit?: number;
+  };
+  style_text_range: {
+    nodeId: string;
+    ranges: Array<{
+      start: number;
+      end: number;
+      fontName?: { family: string; style: string };
+      fontSize?: number;
+      fills?: any[];
+      textCase?: string;
+      textDecoration?: string;
+      letterSpacing?: any;
+      lineHeight?: any;
+      hyperlink?: any;
+      listOptions?: { type: string };
+      indentation?: number;
+      textStyleId?: string;
+      fillStyleId?: string;
+    }>;
   };
   edit_groups: {
     operation: "group" | "ungroup";

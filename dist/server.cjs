@@ -2960,6 +2960,57 @@ server.tool(
   }
 );
 server.tool(
+  "style_text_range",
+  "Apply per-character-range styling to a TEXT node \u2014 the mixed-style edits edit_nodes can't express, since a node-level setter writes the whole text. Each entry is a [start, end) character span (start inclusive, end exclusive) with one or more style props; only the props you pass on that span are changed. Fonts for the affected ranges are loaded automatically. Read the node's current runs first via read_node_raw \u2192 `styledTextSegments`. `hyperlink`: pass a URL string (or {type:'URL'|'NODE', value}) to set it, or null to clear it. Colors in `fills` accept #RRGGBB.",
+  {
+    nodeId: import_zod4.z.string().describe("The TEXT node to style"),
+    ranges: import_zod4.z.array(
+      import_zod4.z.object({
+        start: import_zod4.z.number().describe("Start character index (inclusive)"),
+        end: import_zod4.z.number().describe("End character index (exclusive)"),
+        fontName: import_zod4.z.object({ family: import_zod4.z.string(), style: import_zod4.z.string() }).optional().describe("Font for this range (loaded automatically). Use list_fonts to get valid family/style."),
+        fontSize: import_zod4.z.number().optional(),
+        fills: import_zod4.z.array(import_zod4.z.any()).optional().describe("Paint array; a paint's color accepts #RRGGBB"),
+        textCase: import_zod4.z.enum(["ORIGINAL", "UPPER", "LOWER", "TITLE", "SMALL_CAPS", "SMALL_CAPS_FORCED"]).optional(),
+        textDecoration: import_zod4.z.enum(["NONE", "UNDERLINE", "STRIKETHROUGH"]).optional(),
+        letterSpacing: import_zod4.z.any().optional().describe("Number (px shorthand) or {value, unit}"),
+        lineHeight: import_zod4.z.any().optional().describe("Number (px shorthand) or {value, unit:'PIXELS'|'PERCENT'} or {unit:'AUTO'}"),
+        hyperlink: import_zod4.z.any().optional().describe("URL string, {type,value}, or null to clear"),
+        listOptions: import_zod4.z.object({ type: import_zod4.z.enum(["ORDERED", "UNORDERED", "NONE"]) }).optional(),
+        indentation: import_zod4.z.number().optional(),
+        textStyleId: import_zod4.z.string().optional().describe("Apply a shared text style by id"),
+        fillStyleId: import_zod4.z.string().optional().describe("Apply a shared paint/fill style by id")
+      })
+    ).min(1).describe("Character ranges to style")
+  },
+  async ({ nodeId, ranges }) => {
+    try {
+      const result = await sendCommandToFigma("style_text_range", { nodeId, ranges });
+      const lines = (result.ranges || []).map(
+        (r) => `[${r.start},${r.end}) \u2192 ${(r.applied || []).join(", ") || "no-op"}`
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Styled ${result.ranges.length} range(s) on ${result.nodeId} (text length ${result.length}):
+${lines.join("\n")}`
+          }
+        ]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error styling text range: ${error instanceof Error ? error.message : String(error)}`
+          }
+        ]
+      };
+    }
+  }
+);
+server.tool(
   "edit_groups",
   "Group or ungroup nodes. `group` wraps 2+ nodes in a new GROUP (placed in the first node's current parent unless `parentId` is given). `ungroup` dissolves each GROUP/FRAME in `nodeIds` back into its parent and returns the freed children with their new IDs (ungroup reparents, so IDs change). A GROUP is a lightweight container with no layout/clipping of its own \u2014 use a FRAME (via write_nodes) when you need auto-layout, padding, or clipping.",
   {
