@@ -696,7 +696,13 @@ async function setReactions(params) {
   }
 
   const results = [];
+  // Each entry awaits getNodeByIdAsync + setReactionsAsync; a long list can exceed
+  // the 30s command timeout, so stream progress to keep the inactivity timer alive.
+  const progress = makeProgress("set_reactions", entries.length, { commandId: params && params.commandId, minItems: 5 });
+  await progress.start(`Setting reactions on ${entries.length} nodes...`);
+  let done = 0;
   for (const entry of entries) {
+    await progress.tick(++done, `Processed ${done}/${entries.length}`);
     if (!entry || !entry.nodeId) {
       results.push({ success: false, error: "Missing nodeId in entry" });
       continue;
@@ -720,6 +726,7 @@ async function setReactions(params) {
     }
   }
 
+  await progress.done(`Set reactions on ${entries.length} nodes`);
   const succeeded = results.filter((r) => r.success).length;
   return { total: entries.length, succeeded, failed: entries.length - succeeded, results };
 }
@@ -1118,7 +1125,11 @@ async function writeStyles(params) {
     throw new Error("write_styles requires a non-empty `styles` array");
   }
   const out = [];
+  const progress = makeProgress("write_styles", input.length, { commandId: params && params.commandId, minItems: 5 });
+  await progress.start(`Creating ${input.length} styles...`);
+  let done = 0;
   for (const spec of input) {
+    await progress.tick(++done, `Created ${done}/${input.length} styles`);
     const type = String((spec && spec.type) || "").toUpperCase();
     const make = STYLE_FACTORIES[type];
     if (!make) {
@@ -1140,6 +1151,7 @@ async function writeStyles(params) {
       out.push({ ok: false, type, error: e && e.message ? e.message : String(e) });
     }
   }
+  await progress.done(`Created ${out.filter((s) => s.ok).length}/${input.length} styles`);
   return { styles: out, created: out.filter((s) => s.ok).length, total: input.length };
 }
 
@@ -1149,7 +1161,11 @@ async function editStyles(params) {
     throw new Error("edit_styles requires a non-empty `styles` array");
   }
   const out = [];
+  const progress = makeProgress("edit_styles", input.length, { commandId: params && params.commandId, minItems: 5 });
+  await progress.start(`Editing ${input.length} styles...`);
+  let done = 0;
   for (const spec of input) {
+    await progress.tick(++done, `Edited ${done}/${input.length} styles`);
     try {
       const style = await resolveStyle(spec);
       if (!style) throw new Error("style not found: " + (spec.name || spec.id));
@@ -1165,6 +1181,7 @@ async function editStyles(params) {
       out.push({ ok: false, id: spec && spec.id, name: spec && spec.name, error: e && e.message ? e.message : String(e) });
     }
   }
+  await progress.done(`Edited ${out.filter((s) => s.ok).length}/${input.length} styles`);
   return { styles: out, updated: out.filter((s) => s.ok && !s.removed).length, removed: out.filter((s) => s.removed).length, total: input.length };
 }
 
@@ -3575,9 +3592,16 @@ async function combineAsVariants(params) {
     throw new Error("combine_as_variants requires `nodeIds` with at least 2 component ids");
   }
 
+  // Each id needs an async getNodeByIdAsync; a large set can exceed the 30s
+  // timeout, so stream progress across the rename + resolve passes.
+  const progress = makeProgress("combine_as_variants", (Array.isArray(rename) ? rename.length : 0) + nodeIds.length, { commandId: params && params.commandId, minItems: 5 });
+  await progress.start(`Resolving ${nodeIds.length} components...`);
+  let done = 0;
+
   // Rename pass first: combineAsVariants reads names to infer variant props.
   if (Array.isArray(rename)) {
     for (const r of rename) {
+      await progress.tick(++done, `Renaming (${done})`);
       if (!r || !r.nodeId || typeof r.name !== "string") continue;
       const n = await figma.getNodeByIdAsync(r.nodeId);
       if (n) n.name = r.name;
@@ -3586,6 +3610,7 @@ async function combineAsVariants(params) {
 
   const nodes = [];
   for (const id of nodeIds) {
+    await progress.tick(++done, `Resolved ${nodes.length}/${nodeIds.length} components`);
     const node = await figma.getNodeByIdAsync(id);
     if (!node) throw new Error(`Node not found: ${id}`);
     if (node.type !== "COMPONENT") {
@@ -3593,6 +3618,7 @@ async function combineAsVariants(params) {
     }
     nodes.push(node);
   }
+  await progress.done(`Combining ${nodes.length} components into a variant set`);
 
   let parent = figma.currentPage;
   if (parentId) {
@@ -3645,8 +3671,12 @@ async function booleanOperation(params) {
     throw new Error("boolean_operation requires `nodeIds` with at least 2 node ids");
   }
 
+  const progress = makeProgress("boolean_operation", nodeIds.length, { commandId: params && params.commandId, minItems: 5 });
+  await progress.start(`Resolving ${nodeIds.length} nodes...`);
+  let done = 0;
   const nodes = [];
   for (const id of nodeIds) {
+    await progress.tick(++done, `Resolved ${nodes.length}/${nodeIds.length} nodes`);
     const node = await figma.getNodeByIdAsync(id);
     if (!node) throw new Error(`Node not found: ${id}`);
     nodes.push(node);
@@ -3657,6 +3687,7 @@ async function booleanOperation(params) {
     parent = await figma.getNodeByIdAsync(parentId);
     if (!parent) throw new Error(`Parent not found: ${parentId}`);
   }
+  await progress.done(`Applying ${operation} to ${nodes.length} nodes`);
 
   // figma.union/subtract/intersect/exclude throw if a node isn't a valid
   // boolean operand (e.g. not a vector/shape) or the parent can't host it.
@@ -3692,8 +3723,15 @@ async function transformNodes(params) {
     throw new Error("transform_nodes requires a non-empty `nodeIds` array");
   }
 
+  // Resolve pass (getNodeByIdAsync per id) + the per-node op loop below both run
+  // under the 30s timeout; flatten has no op loop (single figma.flatten call).
+  const progress = makeProgress("transform_nodes", nodeIds.length + (operation === "flatten" ? 0 : nodeIds.length), { commandId: params && params.commandId, minItems: 5 });
+  await progress.start(`Resolving ${nodeIds.length} nodes...`);
+  let done = 0;
+
   const nodes = [];
   for (const id of nodeIds) {
+    await progress.tick(++done, `Resolved ${nodes.length}/${nodeIds.length} nodes`);
     const node = await figma.getNodeByIdAsync(id);
     if (!node) throw new Error(`Node not found: ${id}`);
     nodes.push(node);
@@ -3709,6 +3747,7 @@ async function transformNodes(params) {
     // Throws if an operand can't be flattened or the parent can't host the result.
     const v = figma.flatten(nodes, parent);
     if (typeof name === "string" && name) v.name = name;
+    await progress.done(`Flattened ${nodes.length} nodes`);
     return {
       success: true,
       operation,
@@ -3718,6 +3757,7 @@ async function transformNodes(params) {
 
   const results = [];
   for (const node of nodes) {
+    await progress.tick(++done, `${operation}: ${results.length}/${nodes.length} done`);
     if (operation === "outline_stroke") {
       const v = node.outlineStroke();
       results.push(
@@ -3751,6 +3791,7 @@ async function transformNodes(params) {
     }
   }
 
+  await progress.done(`${operation}: ${results.length} nodes`);
   return { success: true, operation, results };
 }
 
@@ -3807,14 +3848,25 @@ async function styleTextRange(params) {
 
   const len = node.characters.length;
 
+  // Font loads (one async call each) plus the per-range styling can together
+  // exceed the 30s timeout on a heavily-styled node, so stream progress.
+  const fontsToLoad = node.getRangeAllFontNames(0, len);
+  const progress = makeProgress("style_text_range", fontsToLoad.length + ranges.length, { commandId: params && params.commandId, minItems: 5 });
+  await progress.start(`Loading ${fontsToLoad.length} fonts...`);
+  let done = 0;
+
   // Load every font already used in the node, then any new font a range brings in.
-  for (const f of node.getRangeAllFontNames(0, len)) await figma.loadFontAsync(f);
+  for (const f of fontsToLoad) {
+    await figma.loadFontAsync(f);
+    await progress.tick(++done, `Loaded ${done}/${fontsToLoad.length} fonts`);
+  }
   for (const r of ranges) {
     if (r && r.fontName) await figma.loadFontAsync(r.fontName);
   }
 
   const results = [];
   for (let i = 0; i < ranges.length; i++) {
+    await progress.tick(++done, `Styled ${i}/${ranges.length} ranges`);
     const r = ranges[i] || {};
     const { start, end } = r;
     if (typeof start !== "number" || typeof end !== "number") {
@@ -3850,6 +3902,7 @@ async function styleTextRange(params) {
     results.push({ start, end, applied });
   }
 
+  await progress.done(`Styled ${results.length} ranges`);
   return { success: true, nodeId: node.id, length: len, ranges: results };
 }
 
@@ -3866,12 +3919,17 @@ async function editGroups(params) {
     throw new Error("edit_groups requires a non-empty `nodeIds` array");
   }
 
+  const progress = makeProgress("edit_groups", nodeIds.length, { commandId: params && params.commandId, minItems: 5 });
+  await progress.start(`Resolving ${nodeIds.length} nodes...`);
+  let done = 0;
   const nodes = [];
   for (const id of nodeIds) {
+    await progress.tick(++done, `Resolved ${nodes.length}/${nodeIds.length} nodes`);
     const node = await figma.getNodeByIdAsync(id);
     if (!node) throw new Error(`Node not found: ${id}`);
     nodes.push(node);
   }
+  await progress.done(`Resolved ${nodes.length} nodes`);
 
   if (operation === "ungroup") {
     const freed = [];
@@ -3954,13 +4012,19 @@ async function writeTable(params) {
 
   const cellErrors = [];
   if (Array.isArray(cells)) {
+    // Each cell loads its font (async); a big table can exceed the 30s timeout.
+    const progress = makeProgress("write_table", cells.length, { commandId: params && params.commandId, minItems: 5 });
+    await progress.start(`Filling ${cells.length} cells...`);
+    let done = 0;
     for (const cell of cells) {
+      await progress.tick(++done, `Filled ${done}/${cells.length} cells`);
       try {
         await setTableCellText(table, cell);
       } catch (err) {
         cellErrors.push({ row: cell && cell.row, column: cell && cell.column, error: err && err.message ? err.message : String(err) });
       }
     }
+    await progress.done(`Filled ${cells.length} cells`);
   }
 
   const result = { success: true, id: table.id, name: table.name, type: table.type, numRows: table.numRows, numColumns: table.numColumns };
@@ -3992,13 +4056,19 @@ async function editTable(params) {
   if (Array.isArray(resizeRows)) for (const rr of resizeRows) tryOp(`resizeRow ${rr && rr.index}`, () => table.resizeRow(rr.index, rr.height));
 
   if (Array.isArray(cells)) {
+    // Each cell loads its font (async); a big batch can exceed the 30s timeout.
+    const progress = makeProgress("edit_table", cells.length, { commandId: params && params.commandId, minItems: 5 });
+    await progress.start(`Filling ${cells.length} cells...`);
+    let done = 0;
     for (const cell of cells) {
+      await progress.tick(++done, `Filled ${done}/${cells.length} cells`);
       try {
         await setTableCellText(table, cell);
       } catch (err) {
         errors.push({ op: `cell (${cell && cell.row},${cell && cell.column})`, error: err && err.message ? err.message : String(err) });
       }
     }
+    await progress.done(`Filled ${cells.length} cells`);
   }
 
   const result = { success: true, id: table.id, name: table.name, type: table.type, numRows: table.numRows, numColumns: table.numColumns };
@@ -4125,6 +4195,13 @@ async function setVariables(params) {
   // Aliases resolve in a second pass so a token can reference one created later in the batch.
   const pendingAliases = [];
 
+  // Many tokens (async lookups + setValueForMode per mode) can exceed the 30s
+  // timeout; stream progress over the total variable count across collections.
+  const totalVars = input.reduce((a, cs) => a + ((cs.variables && cs.variables.length) || 0), 0);
+  const progress = makeProgress("set_variables", totalVars, { commandId: params && params.commandId, minItems: 5 });
+  await progress.start(`Writing ${totalVars} variables...`);
+  let done = 0;
+
   for (const cs of input) {
     let collection = null;
     if (cs.id) {
@@ -4172,6 +4249,7 @@ async function setVariables(params) {
 
     const varsOut = [];
     for (const vi of cs.variables || []) {
+      await progress.tick(++done, `Wrote ${done}/${totalVars} variables`);
       let variable = null;
       if (vi.id) {
         variable = existingVars.find((v) => v.id === vi.id) ||
@@ -4223,6 +4301,7 @@ async function setVariables(params) {
   }
 
   for (const pa of pendingAliases) {
+    await progress.tick(done, `Resolving ${pendingAliases.length} aliases`);
     const refName = pa.ref.alias;
     const refId = pa.ref.id;
     let target = null;
@@ -4234,6 +4313,7 @@ async function setVariables(params) {
     pa.variable.setValueForMode(pa.modeId, figma.variables.createVariableAlias(target));
   }
 
+  await progress.done(`Wrote ${totalVars} variables`);
   return result;
 }
 
@@ -4249,7 +4329,13 @@ async function bindVariables(params) {
   }
 
   const results = [];
+  // Each binding awaits getNodeByIdAsync (and sometimes getLocalVariablesAsync);
+  // a large batch can exceed the 30s timeout, so stream progress.
+  const progress = makeProgress("bind_variables", bindings.length, { commandId: params && params.commandId, minItems: 5 });
+  await progress.start(`Binding ${bindings.length} variables...`);
+  let done = 0;
   for (const b of bindings) {
+    await progress.tick(++done, `Bound ${done}/${bindings.length}`);
     try {
       const node = await figma.getNodeByIdAsync(b.nodeId);
       if (!node) throw new Error("Node not found: " + b.nodeId);
@@ -4289,5 +4375,6 @@ async function bindVariables(params) {
     }
   }
 
+  await progress.done(`Bound ${results.filter((r) => !r.error).length}/${bindings.length} variables`);
   return { results, total: bindings.length, applied: results.filter((r) => !r.error).length };
 }
