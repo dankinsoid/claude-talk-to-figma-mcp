@@ -693,6 +693,63 @@ server.tool(
   }
 );
 server.tool(
+  "query_nodes",
+  'Find nodes by predicates on their STRUCTURE \u2014 query the node model\'s fields, not flat text. Pass `where`: an array of `{path, op, value}` predicates that are AND-combined; a node is a hit when all pass. Returned one per line as `id:"name".TYPE @parent {path=value, ...}`. `path` walks the node JSON: dot for objects, `[i]` for an array index, `[*]` for "any array element" (e.g. `fills[*].color`, `boundVariables.fills`, `fontSize`, `name`, `type`). Ops \u2014 `regex` (DEFAULT; case-insensitive with `i:true`; covers equality/contains/oneOf via the pattern; this is the right op for strings, ids, enums, even numbers as text); `gt`/`gte`/`lt`/`lte` (numeric compare \u2014 what regex can\'t do, e.g. fontSize<12, opacity<1); `color` (value is `#RRGGBB`; matches a Figma rgb 0-1 color with tolerance); `exists`/`absent` (presence of the KEY itself, no value \u2014 `absent` finds nodes MISSING a field, e.g. `boundVariables.fills` absent = a fill NOT bound to a variable/token; the core design-system audit query). Scope with `root` (default current page), `depth`, `within` (absolute rect). `bbox:true` appends each hit\'s [x,y wxh]. Ids (and `@parent`) are short counters \u2014 feed straight into other tools. Caps at `maxMatches` hits (default 1000). For raw authored copy use grep_nodes; for a plain type/name index use glob_nodes.',
+  {
+    where: z.array(
+      z.object({
+        path: z.string().describe('Field path on the node. Dot for objects, [i] for an index, [*] for any array element. E.g. "fontSize", "fills[*].color", "boundVariables.fills", "name".'),
+        op: z.enum(["regex", "gt", "gte", "lt", "lte", "color", "exists", "absent"]).optional().describe('Match op. Default "regex". Use gt/gte/lt/lte for numbers, color for #RRGGBB, exists/absent for key presence (no value needed).'),
+        value: z.union([z.string(), z.number(), z.boolean()]).optional().describe('Comparison value. Regex source for "regex", a number for compares, "#RRGGBB" for color. Omit for exists/absent.'),
+        i: z.boolean().optional().describe('Case-insensitive regex (only for op "regex"). Default false.')
+      })
+    ).min(1).describe("Predicates, AND-combined. At least one required."),
+    root: z.string().optional().describe("Node id to search under. Defaults to the current page. Accepts short ids (n0, ...)."),
+    depth: z.number().optional().describe("Max depth below root to descend (root's direct children = 1). Omit for unlimited."),
+    within: z.object({
+      x: z.number(),
+      y: z.number(),
+      width: z.number(),
+      height: z.number()
+    }).optional().describe("Absolute rectangle; keep only nodes whose bounding box intersects it. Same coordinate space as glob_nodes' [x,y wxh]."),
+    bbox: z.boolean().optional().describe("Append each hit's absolute bounding box as [x,y wxh]. Default false."),
+    maxMatches: z.number().optional().describe("Hard cap on collected hits before the walk stops. Default 1000."),
+    ...saveParams
+  },
+  async ({ where, root, depth, within, bbox, maxMatches, saveToFile, outputPath }) => {
+    try {
+      const result = await sendCommandToFigma("query_nodes", {
+        where,
+        root,
+        depth,
+        within,
+        bbox,
+        maxMatches
+      });
+      const matches = renumberIds(result?.matches || []);
+      const lines = matches.map((m) => {
+        const parent = m.parentId ? ` @${renumberIds({ id: m.parentId }).id}` : "";
+        const box2 = m.bbox ? ` [${m.bbox.x},${m.bbox.y} ${m.bbox.w}x${m.bbox.h}]` : "";
+        const props = (m.props || []).map((p) => `${p.path}=${p.value}`).join(", ");
+        return `${m.id}:${JSON.stringify(m.name)}.${m.type}${parent}${box2}${props ? ` {${props}}` : ""}`;
+      });
+      const text = (lines.join("\n") || "(no matches)") + (result?.truncated ? "\n(truncated)" : "");
+      return {
+        content: [await textContent(text, `${matches.length} nodes`, { saveToFile, outputPath }, "query")]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error querying nodes: ${error instanceof Error ? error.message : String(error)}`
+          }
+        ]
+      };
+    }
+  }
+);
+server.tool(
   "get_nodes_info",
   "Get information about multiple nodes in Figma, compacted for low token cost. Same depth/collapse controls as get_node_info.",
   {

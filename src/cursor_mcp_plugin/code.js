@@ -204,6 +204,8 @@ async function handleCommand(command, params) {
       return await globNodes(params);
     case "grep_nodes":
       return await grepNodes(params);
+    case "query_nodes":
+      return await queryNodes(params);
     case "set_multiple_annotations":
       return await setMultipleAnnotations(params);
     case "get_instance_overrides":
@@ -2826,6 +2828,242 @@ async function grepNodes(params) {
   walk(rootNode, 0, null);
 
   return { count: matches.length, nodeCount: hitNodes.size, truncated, matches };
+}
+
+// @ai-generated(guided)
+/**
+ * Structural search over a subtree — query nodes by predicates on their fields,
+ * not by flat text. Each predicate is {path, op, value}; a node is a hit when
+ * ALL predicates pass (AND). `path` walks the node JSON (dot for objects,
+ * `[i]` for an index, `[*]` for "any array element"); ops cover what regex
+ * can't: numeric compare, color (rgb 0-1 ↔ hex with tolerance), and presence
+ * of the KEY itself (`exists`/`absent` — e.g. find fills NOT bound to a
+ * variable). String/equality/oneOf are all the default `regex` op.
+ * @param {Object} params
+ * @param {Array<{path:string,op?:string,value?:any,i?:boolean}>} params.where - Predicates, AND-combined. Required, ≥1.
+ * @param {string} [params.root] - Node id to search under; defaults to current page.
+ * @param {number} [params.depth] - Max depth below root (direct children = 1). Omit = unlimited.
+ * @param {{x,y,width,height}} [params.within] - Keep only nodes intersecting this absolute rect.
+ * @param {boolean} [params.bbox] - Include each hit's absolute bbox. Default false.
+ * @param {number} [params.maxMatches=1000] - Hard cap on collected hits.
+ * @returns {Promise<{count:number,truncated:boolean,matches:Array<{id,name,type,parentId,props:Array<{path,value}>,bbox?}>}>}
+ */
+async function queryNodes(params) {
+  const { root, where, depth, within, bbox } = params || {};
+  if (!Array.isArray(where) || where.length === 0) {
+    throw new Error("query_nodes requires a non-empty `where` array of predicates");
+  }
+
+  let rootNode;
+  if (root) {
+    rootNode = await figma.getNodeByIdAsync(root);
+    if (!rootNode) throw new Error(`Node with ID ${root} not found`);
+  } else {
+    rootNode = figma.currentPage;
+  }
+
+  // Pre-compile predicates once (parse path, build regex) so the walk is cheap.
+  const preds = where.map((p) => {
+    const op = p.op || "regex";
+    if (op !== "exists" && op !== "absent" && p.value === undefined) {
+      throw new Error(`Predicate on "${p.path}" with op "${op}" needs a value`);
+    }
+    let re = null;
+    if (op === "regex") {
+      try {
+        re = new RegExp(String(p.value), p.i ? "i" : "");
+      } catch (e) {
+        throw new Error(`Invalid regex for "${p.path}": ${e.message}`);
+      }
+    }
+    let target = null;
+    if (op === "color") {
+      target = hexToRgb01(String(p.value));
+      if (!target) throw new Error(`color op on "${p.path}" needs a #RRGGBB value`);
+    }
+    return { path: p.path, op, value: p.value, steps: parseFieldPath(p.path), re, target };
+  });
+
+  const region = within
+    ? { x: within.x, y: within.y, width: within.width, height: within.height }
+    : null;
+  const maxDepth = typeof depth === "number" ? depth : Infinity;
+  const includeBbox = bbox === true;
+  const maxMatches = typeof params.maxMatches === "number" ? params.maxMatches : 1000;
+
+  const matches = [];
+  let truncated = false;
+
+  const walk = (node, d, parentId) => {
+    if (truncated) return;
+    if (d > 0) {
+      const abox = node.absoluteBoundingBox || null;
+      if (!region || (abox && rectsIntersect(abox, region))) {
+        const props = [];
+        let allPass = true;
+        for (const pred of preds) {
+          const vals = resolveFieldPath(node, pred.steps); // present leaf values
+          const pass = testPredicate(pred, vals);
+          if (!pass) {
+            allPass = false;
+            break;
+          }
+          // First present value drives the display; presence ops have none.
+          props.push({ path: pred.path, value: displayValue(pred, vals) });
+        }
+        if (allPass) {
+          const hit = { id: node.id, name: node.name || "", type: node.type, parentId, props };
+          if (includeBbox && abox) {
+            hit.bbox = {
+              x: Math.round(abox.x),
+              y: Math.round(abox.y),
+              w: Math.round(abox.width),
+              h: Math.round(abox.height),
+            };
+          }
+          matches.push(hit);
+          if (matches.length >= maxMatches) {
+            truncated = true;
+            return;
+          }
+        }
+      }
+    }
+    if (d < maxDepth && "children" in node) {
+      for (const child of node.children) {
+        walk(child, d + 1, node.id);
+        if (truncated) return;
+      }
+    }
+  };
+  walk(rootNode, 0, null);
+
+  return { count: matches.length, truncated, matches };
+}
+
+/**
+ * Tokenize a field path into steps. `fills[*].color` → [{key:fills},{wild},{key:color}].
+ * @param {string} path
+ * @returns {Array<{key?:string,index?:number,wild?:boolean}>}
+ */
+function parseFieldPath(path) {
+  const steps = [];
+  const re = /([^.\[\]]+)|\[(\d+)\]|\[\*\]/g;
+  let m;
+  while ((m = re.exec(path)) !== null) {
+    if (m[1] !== undefined) steps.push({ key: m[1] });
+    else if (m[2] !== undefined) steps.push({ index: parseInt(m[2], 10) });
+    else steps.push({ wild: true });
+  }
+  return steps;
+}
+
+/**
+ * Resolve a parsed path against a node, returning every PRESENT leaf value
+ * (branching at `[*]`). Property reads are guarded — Figma getters can throw on
+ * unsupported node types, and that simply means "not present here". A value
+ * that is itself `figma.mixed` is returned (counts as present) but is not
+ * descended into.
+ * @returns {any[]} present leaf values; empty = path absent on this node
+ */
+function resolveFieldPath(node, steps) {
+  let current = [node];
+  for (const step of steps) {
+    const next = [];
+    for (const cur of current) {
+      if (cur == null || cur === figma.mixed) continue;
+      try {
+        if (step.wild) {
+          if (Array.isArray(cur)) for (const el of cur) next.push(el);
+        } else if (step.index != null) {
+          if (Array.isArray(cur) && step.index < cur.length) next.push(cur[step.index]);
+        } else {
+          const v = cur[step.key];
+          if (v !== undefined) next.push(v);
+        }
+      } catch (e) {
+        // getter threw on this node type → field not present here
+      }
+    }
+    current = next;
+  }
+  return current;
+}
+
+/** Evaluate one compiled predicate against a node's resolved values. */
+function testPredicate(pred, vals) {
+  if (pred.op === "exists") return vals.length > 0;
+  if (pred.op === "absent") return vals.length === 0;
+  for (const v of vals) {
+    if (matchScalar(pred, v)) return true; // ANY present value satisfies
+  }
+  return false;
+}
+
+/** Value-op match for a single resolved value. `figma.mixed` never matches. */
+function matchScalar(pred, v) {
+  if (v === figma.mixed) return false;
+  switch (pred.op) {
+    case "regex":
+      return pred.re.test(typeof v === "object" ? JSON.stringify(v) : String(v));
+    case "gt":
+      return typeof v === "number" && v > pred.value;
+    case "gte":
+      return typeof v === "number" && v >= pred.value;
+    case "lt":
+      return typeof v === "number" && v < pred.value;
+    case "lte":
+      return typeof v === "number" && v <= pred.value;
+    case "color":
+      return colorMatches(v, pred.target);
+    default:
+      throw new Error(`Unknown op "${pred.op}"`);
+  }
+}
+
+/** A short, human-readable value for output. Presence ops have no value. */
+function displayValue(pred, vals) {
+  if (pred.op === "exists") return "✓";
+  if (pred.op === "absent") return "∅";
+  const v = vals.find((x) => x !== figma.mixed);
+  if (v === undefined) return vals.length ? "mixed" : "";
+  if (pred.op === "color" && v && typeof v === "object" && typeof v.r === "number") {
+    return rgb01ToHex(v);
+  }
+  if (typeof v === "object") {
+    const s = JSON.stringify(v);
+    return s.length > 80 ? s.slice(0, 79) + "…" : s;
+  }
+  return String(v);
+}
+
+/** Parse #RRGGBB (or #RGB) to {r,g,b} in 0-1. Null on bad input. */
+function hexToRgb01(hex) {
+  let h = String(hex).trim().replace(/^#/, "");
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
+  return {
+    r: parseInt(h.slice(0, 2), 16) / 255,
+    g: parseInt(h.slice(2, 4), 16) / 255,
+    b: parseInt(h.slice(4, 6), 16) / 255,
+  };
+}
+
+/** {r,g,b} 0-1 → #RRGGBB. */
+function rgb01ToHex(c) {
+  const h = (n) => Math.round(Math.max(0, Math.min(1, n)) * 255).toString(16).padStart(2, "0");
+  return "#" + h(c.r) + h(c.g) + h(c.b);
+}
+
+/** Component-wise color match with a tolerance (~5/255) — float rgb is never exact. */
+function colorMatches(v, target) {
+  if (!v || typeof v !== "object" || typeof v.r !== "number") return false;
+  const tol = 0.02;
+  return (
+    Math.abs(v.r - target.r) <= tol &&
+    Math.abs(v.g - target.g) <= tol &&
+    Math.abs(v.b - target.b) <= tol
+  );
 }
 
 /** Axis-aligned rectangle overlap test (touching edges do not count). */
