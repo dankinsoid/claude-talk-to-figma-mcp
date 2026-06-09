@@ -76,10 +76,22 @@ const SUBLAYER_TEXT_FIELDS = ["characters", "fontName", "fontSize", "letterSpaci
 
 // Range constraints Figma enforces at runtime but doesn't encode in its types
 // (it types these as bare `number`) — restored so the gate rejects them up front.
+// A typed length the agent may give as a bare number (PIXELS shorthand the
+// plugin coerces) or the explicit {value, unit} object. lineHeight also takes
+// {unit:'AUTO'} (no value). The generated types only allow the object form, so
+// without these overrides a bare number is rejected server-side before the
+// plugin's coercion ever runs (see coerceTypedUnit in code.js).
+const pixelsOrUnit = z.union([
+  z.number(),
+  z.object({ value: z.number(), unit: z.enum(["PIXELS", "PERCENT"]) }).passthrough(),
+]);
+
 const FIELD_OVERRIDES: Record<string, z.ZodTypeAny> = {
   opacity: z.number().min(0).max(1),
   cornerRadius: z.number().min(0),
   strokeWeight: z.number().min(0),
+  letterSpacing: pixelsOrUnit,
+  lineHeight: z.union([pixelsOrUnit, z.object({ unit: z.literal("AUTO") }).passthrough()]),
 };
 
 // Keys that are read-only or read-format-only — surfaced as a clear redirect

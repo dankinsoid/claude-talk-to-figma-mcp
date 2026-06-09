@@ -1086,10 +1086,16 @@ var CONTAINER_TYPES = /* @__PURE__ */ new Set(["FRAME", "COMPONENT", "SECTION", 
 var REQUIRED = { TEXT: /* @__PURE__ */ new Set(["characters"]) };
 var SUBLAYER_TEXT_TYPES = /* @__PURE__ */ new Set(["STICKY", "SHAPE_WITH_TEXT"]);
 var SUBLAYER_TEXT_FIELDS = ["characters", "fontName", "fontSize", "letterSpacing", "lineHeight", "textAlignHorizontal"];
+var pixelsOrUnit = z3.union([
+  z3.number(),
+  z3.object({ value: z3.number(), unit: z3.enum(["PIXELS", "PERCENT"]) }).passthrough()
+]);
 var FIELD_OVERRIDES = {
   opacity: z3.number().min(0).max(1),
   cornerRadius: z3.number().min(0),
-  strokeWeight: z3.number().min(0)
+  strokeWeight: z3.number().min(0),
+  letterSpacing: pixelsOrUnit,
+  lineHeight: z3.union([pixelsOrUnit, z3.object({ unit: z3.literal("AUTO") }).passthrough()])
 };
 var READ_ONLY_KEYS = {
   style: "REST read-format; on write use fontName {family,style} + fontSize on a TEXT node",
