@@ -700,9 +700,17 @@ var shapeParams = {
   collapseRepeats: z2.boolean().optional().describe("Collapse repeated instances of the same component: the first renders in full, later copies become a stub with their props/text and more:true (default true)."),
   cull: z2.boolean().optional().describe("Drop nodes that render nowhere \u2014 fully clipped out by an ancestor's clipsContent ({id, clipped:true}) or fully covered by an opaque sibling above ({id, occluded:true}). Default true.")
 };
+var NAME_MAX = 40;
+function truncName(name) {
+  if (typeof name !== "string" || name.length <= NAME_MAX) return name;
+  return name.slice(0, NAME_MAX - 1) + "\u2026";
+}
+function fmtNodeRef(id, name, type) {
+  return `${id}:${JSON.stringify(truncName(name))}.${type}`;
+}
 server.tool(
   "read_node",
-  "Read Figma nodes \u2014 the Read tool for the canvas. Pass `nodeIds` (one or many); omit it to read the current selection. Returns one entry per node. Default (compact) gives each node's subtree in a minimal, low-token field set (id, name, type, color/gradient, opacity, box or autoLayout, text); children expand to `depth` levels and deeper nodes become {childCount, more:true} stubs \u2014 re-request a stub's id or raise depth to zoom in. Each requested node also carries `ancestors`: a root-first breadcrumb (page \u2192 ... \u2192 immediate parent) of `{id,name,type}` so you know what contains it without a separate glob \u2014 those ids are short counters too, so pass one back to zoom OUT. Set `raw:true` for the full, unfiltered JSON_REST_V1 of each node with ALL properties but the children array stripped (use when the compact view drops a field you need); in raw mode depth/collapse/cull are ignored \u2014 raw is always one node, all props, no children. Large outputs auto-spill to a file. Node ids are short counters (n0, n1, ...) standing in for canonical Figma ids \u2014 pass them to any tool. Locate ids with glob_nodes/grep_nodes first, then read_node to inspect properties.",
+  "Read Figma nodes \u2014 the Read tool for the canvas. Pass `nodeIds` (one or many); omit it to read the current selection. Returns one entry per node. Default (compact) gives each node's subtree in a minimal, low-token field set (id, name, type, color/gradient, opacity, box or autoLayout, text); children expand to `depth` levels and deeper nodes become {childCount, more:true} stubs \u2014 re-request a stub's id or raise depth to zoom in. Each requested node also carries `ancestors`: a root-first breadcrumb (page \u2192 ... \u2192 immediate parent) of `id:\"name\".TYPE` tokens (same form as glob lines) so you know what contains it without a separate glob \u2014 those ids are short counters too, so pass one back to zoom OUT. Set `raw:true` for the full, unfiltered JSON_REST_V1 of each node with ALL properties but the children array stripped (use when the compact view drops a field you need); in raw mode depth/collapse/cull are ignored \u2014 raw is always one node, all props, no children. Large outputs auto-spill to a file. Node ids are short counters (n0, n1, ...) standing in for canonical Figma ids \u2014 pass them to any tool. Locate ids with glob_nodes/grep_nodes first, then read_node to inspect properties.",
   {
     nodeIds: z2.array(z2.string()).optional().describe("Node ids to read (short n0,... or canonical). Omit to read the current selection."),
     raw: z2.boolean().optional().describe("Return each node's full unfiltered props (children stripped) instead of the compact subtree. Ignores depth/collapse/cull. Default false."),
@@ -737,6 +745,11 @@ server.tool(
         ids.map((nodeId) => sendCommandToFigma("read_node", { nodeId }))
       );
       const shaped = renumberIds(infos.map((info) => shapeNode(info, opts)));
+      for (const node of shaped) {
+        if (Array.isArray(node?.ancestors)) {
+          node.ancestors = node.ancestors.map((a) => fmtNodeRef(a.id, a.name, a.type));
+        }
+      }
       return {
         content: [await jsonContent(shaped, { saveToFile, outputPath }, "node-info")]
       };
@@ -776,7 +789,7 @@ server.tool(
       const lines = matches.map((m) => {
         const parent = m.parentId ? renumberIds({ id: m.parentId }).id : null;
         const box2 = m.bbox ? ` [${m.bbox.x},${m.bbox.y} ${m.bbox.w}x${m.bbox.h}]` : "";
-        return `${m.id}:${JSON.stringify(m.name)}.${m.type}${parent ? ` @${parent}` : ""}${box2}`;
+        return `${fmtNodeRef(m.id, m.name, m.type)}${parent ? ` @${parent}` : ""}${box2}`;
       }).join("\n");
       const text = lines || "(no matches)";
       return {
@@ -843,13 +856,13 @@ server.tool(
           counts.set(m.id, e);
         }
         const lines = [...counts.entries()].map(
-          ([id, e]) => `${id}:${JSON.stringify(e.name)}.${e.type}${fmtParent(e.parentId)} (${e.n} match${e.n === 1 ? "" : "es"})`
+          ([id, e]) => `${fmtNodeRef(id, e.name, e.type)}${fmtParent(e.parentId)} (${e.n} match${e.n === 1 ? "" : "es"})`
         );
         text = (lines.join("\n") || "(no matches)") + (result?.truncated ? "\n(truncated)" : "");
         summary = `${counts.size} nodes`;
       } else {
         const lines = matches.map(
-          (m) => `${m.id}:${JSON.stringify(m.name)}.${m.type}${fmtParent(m.parentId)}${fmtBox(m)} L${m.line}: ${m.text}`
+          (m) => `${fmtNodeRef(m.id, m.name, m.type)}${fmtParent(m.parentId)}${fmtBox(m)} L${m.line}: ${m.text}`
         );
         text = (lines.join("\n") || "(no matches)") + (result?.truncated ? "\n(truncated)" : "");
         summary = `${matches.length} lines`;
@@ -908,7 +921,7 @@ server.tool(
         const parent = m.parentId ? ` @${renumberIds({ id: m.parentId }).id}` : "";
         const box2 = m.bbox ? ` [${m.bbox.x},${m.bbox.y} ${m.bbox.w}x${m.bbox.h}]` : "";
         const props = (m.props || []).map((p) => `${p.path}=${p.value}`).join(", ");
-        return `${m.id}:${JSON.stringify(m.name)}.${m.type}${parent}${box2}${props ? ` {${props}}` : ""}`;
+        return `${fmtNodeRef(m.id, m.name, m.type)}${parent}${box2}${props ? ` {${props}}` : ""}`;
       });
       const text = (lines.join("\n") || "(no matches)") + (result?.truncated ? "\n(truncated)" : "");
       return {

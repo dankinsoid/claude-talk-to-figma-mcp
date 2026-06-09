@@ -259,11 +259,27 @@ type ShapeArgs = {
   cull?: boolean;
 };
 
+// Figma names can be whole paragraphs (notes, annotations carry their full text
+// as the layer name), which otherwise dominate a glob line or an ancestor
+// breadcrumb. Cap them in compact output; the id is still the handle for tools.
+const NAME_MAX = 40;
+function truncName(name: string): string {
+  if (typeof name !== "string" || name.length <= NAME_MAX) return name;
+  return name.slice(0, NAME_MAX - 1) + "…";
+}
+
+// The compact node-reference token shared by every flat listing — glob/grep/
+// query lines and read_node's ancestor breadcrumb: `id:"name".TYPE`, name
+// truncated and JSON-quoted/escaped. One formatter so the shape stays uniform.
+function fmtNodeRef(id: string, name: string, type: string): string {
+  return `${id}:${JSON.stringify(truncName(name))}.${type}`;
+}
+
 // Read Node Tool — the Read tool for the canvas. Variadic; reads the selection
 // when no ids are given. Compact subtree by default, full node props with raw.
 server.tool(
   "read_node",
-  "Read Figma nodes — the Read tool for the canvas. Pass `nodeIds` (one or many); omit it to read the current selection. Returns one entry per node. Default (compact) gives each node's subtree in a minimal, low-token field set (id, name, type, color/gradient, opacity, box or autoLayout, text); children expand to `depth` levels and deeper nodes become {childCount, more:true} stubs — re-request a stub's id or raise depth to zoom in. Each requested node also carries `ancestors`: a root-first breadcrumb (page → ... → immediate parent) of `{id,name,type}` so you know what contains it without a separate glob — those ids are short counters too, so pass one back to zoom OUT. Set `raw:true` for the full, unfiltered JSON_REST_V1 of each node with ALL properties but the children array stripped (use when the compact view drops a field you need); in raw mode depth/collapse/cull are ignored — raw is always one node, all props, no children. Large outputs auto-spill to a file. Node ids are short counters (n0, n1, ...) standing in for canonical Figma ids — pass them to any tool. Locate ids with glob_nodes/grep_nodes first, then read_node to inspect properties.",
+  "Read Figma nodes — the Read tool for the canvas. Pass `nodeIds` (one or many); omit it to read the current selection. Returns one entry per node. Default (compact) gives each node's subtree in a minimal, low-token field set (id, name, type, color/gradient, opacity, box or autoLayout, text); children expand to `depth` levels and deeper nodes become {childCount, more:true} stubs — re-request a stub's id or raise depth to zoom in. Each requested node also carries `ancestors`: a root-first breadcrumb (page → ... → immediate parent) of `id:\"name\".TYPE` tokens (same form as glob lines) so you know what contains it without a separate glob — those ids are short counters too, so pass one back to zoom OUT. Set `raw:true` for the full, unfiltered JSON_REST_V1 of each node with ALL properties but the children array stripped (use when the compact view drops a field you need); in raw mode depth/collapse/cull are ignored — raw is always one node, all props, no children. Large outputs auto-spill to a file. Node ids are short counters (n0, n1, ...) standing in for canonical Figma ids — pass them to any tool. Locate ids with glob_nodes/grep_nodes first, then read_node to inspect properties.",
   {
     nodeIds: z
       .array(z.string())
@@ -310,6 +326,14 @@ server.tool(
       );
       // Renumber across the whole batch so short ids share one counter space.
       const shaped = renumberIds(infos.map((info) => shapeNode(info, opts)));
+      // Collapse the ancestor breadcrumb from {id,name,type} objects to the same
+      // compact `id:"name".TYPE` token glob/grep use (runs after renumber so the
+      // ids are already short). Cuts the per-call breadcrumb roughly in half.
+      for (const node of shaped) {
+        if (Array.isArray(node?.ancestors)) {
+          node.ancestors = node.ancestors.map((a: any) => fmtNodeRef(a.id, a.name, a.type));
+        }
+      }
       return {
         content: [await jsonContent(shaped, { saveToFile, outputPath }, "node-info")],
       };
@@ -373,7 +397,7 @@ server.tool(
         .map((m: any) => {
           const parent = m.parentId ? renumberIds({ id: m.parentId }).id : null;
           const box = m.bbox ? ` [${m.bbox.x},${m.bbox.y} ${m.bbox.w}x${m.bbox.h}]` : "";
-          return `${m.id}:${JSON.stringify(m.name)}.${m.type}${parent ? ` @${parent}` : ""}${box}`;
+          return `${fmtNodeRef(m.id, m.name, m.type)}${parent ? ` @${parent}` : ""}${box}`;
         })
         .join("\n");
       const text = lines || "(no matches)";
@@ -473,13 +497,13 @@ server.tool(
           counts.set(m.id, e);
         }
         const lines = [...counts.entries()].map(
-          ([id, e]) => `${id}:${JSON.stringify(e.name)}.${e.type}${fmtParent(e.parentId)} (${e.n} match${e.n === 1 ? "" : "es"})`
+          ([id, e]) => `${fmtNodeRef(id, e.name, e.type)}${fmtParent(e.parentId)} (${e.n} match${e.n === 1 ? "" : "es"})`
         );
         text = (lines.join("\n") || "(no matches)") + (result?.truncated ? "\n(truncated)" : "");
         summary = `${counts.size} nodes`;
       } else {
         const lines = matches.map(
-          (m: any) => `${m.id}:${JSON.stringify(m.name)}.${m.type}${fmtParent(m.parentId)}${fmtBox(m)} L${m.line}: ${m.text}`
+          (m: any) => `${fmtNodeRef(m.id, m.name, m.type)}${fmtParent(m.parentId)}${fmtBox(m)} L${m.line}: ${m.text}`
         );
         text = (lines.join("\n") || "(no matches)") + (result?.truncated ? "\n(truncated)" : "");
         summary = `${matches.length} lines`;
@@ -572,7 +596,7 @@ server.tool(
         const props = (m.props || [])
           .map((p: any) => `${p.path}=${p.value}`)
           .join(", ");
-        return `${m.id}:${JSON.stringify(m.name)}.${m.type}${parent}${box}${props ? ` {${props}}` : ""}`;
+        return `${fmtNodeRef(m.id, m.name, m.type)}${parent}${box}${props ? ` {${props}}` : ""}`;
       });
       const text = (lines.join("\n") || "(no matches)") + (result?.truncated ? "\n(truncated)" : "");
       return {
