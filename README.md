@@ -1,14 +1,33 @@
 # Talk to Figma MCP
 
-This project implements a Model Context Protocol (MCP) integration between AI agent (Cursor, Claude Code) and Figma, allowing AI agent to communicate with Figma for reading designs and modifying them programmatically.
+A Model Context Protocol (MCP) integration between an AI agent (Cursor, Claude Code) and Figma, letting the agent read and modify designs programmatically.
 
 https://github.com/user-attachments/assets/129a14d2-ed73-470f-9a4c-2240b2a4885c
+
+## Based on `sonnylazuardi/cursor-talk-to-figma-mcp`
+
+This is a fork of [sonnylazuardi/cursor-talk-to-figma-mcp](https://github.com/sonnylazuardi/cursor-talk-to-figma-mcp). It has diverged substantially. The original worked, but in practice it was slow, expensive, and limited:
+
+- it fed the model **near-complete node JSON** for every read — thousands of tokens per node, with full geometry, paints and styles the agent rarely needed;
+- there was **no way to search** — to find anything you dumped a whole subtree and scanned it by eye;
+- **editing was limited** to a handful of single-purpose setters.
+
+This fork reworks the agent's interface around how an AI agent already works with a **codebase** — locate cheaply, read narrowly, edit surgically.
+
+**What's different:**
+
+- **Compact, zoomable hierarchy.** Reads return a minimal field set per node (id, name, type, color, box/auto-layout, text) instead of raw JSON, with a depth cap, drill-in stubs, and collapsing of icons and repeated component instances. A screen that was tens of thousands of tokens is now ~2–3k.
+- **Search tools, code-agent style.** `glob_nodes` (the `ls -R`/glob), `grep_nodes` (regex over text content, the `grep`), and `query_nodes` (predicates over node fields). They return flat, line-oriented `id:"name".TYPE` hits — addresses you feed straight into read/edit, without ever dumping the tree.
+- **A `Read` → `Edit` → `Write` model.** `read_node`, `edit_nodes` (one path-addressed property writer that replaced ~10 single-purpose setters), and `write_nodes` (create whole subtrees from JSON) mirror the file tools the agent is already trained on.
+- **Short node ids.** Long nested instance paths (`I8782:344721;3063:34762;…`) are replaced with short counters (`n0`, `n1`, …) in all compact output, resolved back server-side. Cuts tokens and keeps the tree readable; every tool accepts short or canonical ids.
+- **Bug fixes.** Notably, the original could corrupt text colors: the reaction-highlight animation didn't always restore the original fill. Fixed.
+- **Small UX touches.** The plugin's channel window collapses to a compact widget so it stays out of the way, and the agent can discover the active channel automatically (`get_active_channel`) instead of you pasting it.
 
 ## Project Structure
 
 - `src/talk_to_figma_mcp/` - TypeScript MCP server for Figma integration
-- `src/cursor_mcp_plugin/` - Figma plugin for communicating with Cursor
-- `src/socket.ts` - WebSocket server that facilitates communication between the MCP server and Figma plugin
+- `src/cursor_mcp_plugin/` - Figma plugin for communicating with the agent
+- `src/socket.ts` - WebSocket server that relays messages between the MCP server and the Figma plugin
 
 ## How to use
 
@@ -18,39 +37,27 @@ https://github.com/user-attachments/assets/129a14d2-ed73-470f-9a4c-2240b2a4885c
 curl -fsSL https://bun.sh/install | bash
 ```
 
-2. Run setup, this will also install MCP in your Cursor's active project
+2. Run setup — this also installs the MCP config in your active project (`.cursor/mcp.json` and `.mcp.json`):
 
 ```bash
 bun setup
 ```
 
-3. Start the Websocket server
+3. Start the WebSocket relay:
 
 ```bash
 bun socket
 ```
 
-4. **NEW** Install Figma plugin from [Figma community page](https://www.figma.com/community/plugin/1485687494525374295/cursor-talk-to-figma-mcp-plugin) or [install locally](#figma-plugin)
+4. Install the Figma plugin — see [Figma Plugin](#figma-plugin) below. (Install locally: this fork ships a modified plugin, so the upstream community listing won't include the changes above.)
 
-## Quick Video Tutorial
-
-[Video Link](https://www.linkedin.com/posts/sonnylazuardi_just-wanted-to-share-my-latest-experiment-activity-7307821553654657024-yrh8)
-
-## Design Automation Example
-
-**Bulk text content replacement**
-
-Thanks to [@dusskapark](https://github.com/dusskapark) for contributing the bulk text replacement feature. Here is the [demo video](https://www.youtube.com/watch?v=j05gGT3xfCs).
-
-**Instance Override Propagation**
-Another contribution from [@dusskapark](https://github.com/dusskapark)
-Propagate component instance overrides from a source instance to multiple target instances with a single command. This feature dramatically reduces repetitive design work when working with component instances that need similar customizations. Check out our [demo video](https://youtu.be/uvuT8LByroI).
+5. Run the plugin in Figma, join a channel, then drive it from Cursor or Claude Code.
 
 ## Manual Setup and Installation
 
-### MCP Server: Integration with Cursor
+### MCP Server
 
-Add the server to your Cursor MCP configuration in `~/.cursor/mcp.json`:
+Add the server to your MCP config (`~/.cursor/mcp.json` for Cursor, `.mcp.json` for Claude Code):
 
 ```json
 {
@@ -63,9 +70,13 @@ Add the server to your Cursor MCP configuration in `~/.cursor/mcp.json`:
 }
 ```
 
-### WebSocket Server
+Or via the Claude Code CLI:
 
-Start the WebSocket server:
+```bash
+claude mcp add TalkToFigma -- bunx @dankinsoid/cursor-talk-to-figma-mcp@latest
+```
+
+### WebSocket Server
 
 ```bash
 bun socket
@@ -75,41 +86,109 @@ bun socket
 
 1. In Figma, go to Plugins > Development > New Plugin
 2. Choose "Link existing plugin"
-3. Select the `src/cursor_mcp_plugin/manifest.json` file
-4. The plugin should now be available in your Figma development plugins
+3. Select `src/cursor_mcp_plugin/manifest.json`
+4. The plugin is now available under your Figma development plugins
 
 ## Windows + WSL Guide
 
-1. Install bun via powershell
+1. Install bun via PowerShell:
 
 ```bash
 powershell -c "irm bun.sh/install.ps1|iex"
 ```
 
-2. Uncomment the hostname `0.0.0.0` in `src/socket.ts`
+2. Uncomment the hostname `0.0.0.0` in `src/socket.ts`:
 
 ```typescript
 // uncomment this to allow connections in windows wsl
 hostname: "0.0.0.0",
 ```
 
-3. Start the websocket
+3. Start the websocket:
 
 ```bash
 bun socket
 ```
 
-## Usage
+## MCP Tools
 
-1. Start the WebSocket server
-2. Install the MCP server in Cursor
-3. Open Figma and run the Cursor MCP Plugin
-4. Connect the plugin to the WebSocket server by joining a channel using `join_channel`
-5. Use Cursor to communicate with Figma using the MCP tools
+The agent's workflow mirrors editing a codebase: **search** to locate nodes cheaply, **read** only what you need, then **edit/write**. Node ids are short counters (`n0`, `n1`, …) that flow between every tool; canonical Figma ids are accepted too.
 
-## Local Development Setup
+### Read
 
-To develop, update your mcp config to direct to your local directory.
+- `read_node` — the `Read` tool for the canvas. Pass `nodeIds` (one or many), or omit to read the current selection. Returns the compact, low-token subtree of each node; `depth` controls how far children expand and deeper nodes become drill-in stubs. `raw:true` returns the full unfiltered JSON of a single node (all props, children stripped).
+
+### Search (locate before reading)
+
+- `glob_nodes` — flat type/name-glob index of a subtree, one node per line as `id:"name".TYPE @parent [x,y wxh]` (the `ls -R`/glob analog). Filter by `type` and a shell-style `name` glob; scope with `root`/`depth`/`within`.
+- `grep_nodes` — regex search over the text content of a subtree, line-oriented (the `grep` analog): `id:"name".TEXT @parent L<n>: <line>`. `mode` switches between content / nodes / count.
+- `query_nodes` — structural search by field predicates (`{path, op, value}`, AND-combined). Match any node-model field (fontSize, fills color, bound variables, …), including key presence via `exists`/`absent` — e.g. find fills *not* bound to a variable for a design-system audit.
+
+### Edit & Create
+
+- `edit_nodes` — the `Edit` tool for the node model. Pass `edits: [{nodeId, path, old?, new}]`. `path` addresses one field (`name`, `characters`, `x`, `fills[0].color`, `cornerRadius`, `layoutMode`, `paddingTop`, `itemSpacing`, …); `new` is the value (`#RRGGBB` → Figma rgb; objects/arrays allowed); optional `old` is a guard that rejects only a stale edit. Edits are independent and one call can touch many nodes — this is also how you bulk-replace text (one `{path:"characters"}` per node). Replaced the former single-purpose setters (`move_node`, `resize_node`, `set_text_content`, `set_padding`, `set_layout_mode`, …).
+- `write_nodes` — the `Write` tool. Create new nodes from `{type, ...props, children?}` specs; `children` builds a whole subtree in one call. Placement via `parentId`/`index`. `INSTANCE` needs `componentId`/`componentKey`.
+- `get_write_schema` — the write-side schema for a node type: the fields `write_nodes` accepts when creating it (with no `type`, lists the creatable types). Call it before building a node.
+- `delete_nodes` — delete one or more nodes (chunked with progress for large batches).
+- `clone_node` — copy an existing node with an optional position offset.
+
+### Selection & Channel
+
+- `get_selection` - the current selection
+- `set_selections` / `set_focus` - select nodes (and scroll the viewport to them)
+- `get_active_channel` - the channel the plugin currently has open (so the agent can join without you pasting it)
+- `join_channel` - join a channel to communicate with the plugin
+
+### Components & Styles
+
+- `get_styles` - local styles
+- `get_local_components` - local components
+- `get_instance_overrides` / `set_instance_overrides` - extract overrides from one instance and apply them to others
+
+### Annotations
+
+- `get_annotations` - all annotations in the document or a node
+- `set_annotations` - create/update one or more native annotations (markdown, batched)
+
+### Prototyping & Connections
+
+- `get_reactions` - prototype reactions from nodes
+- `set_default_connector` - set a copied FigJam connector as the default style (required before creating connections)
+- `create_connections` - FigJam connector lines between nodes
+
+### Export
+
+- `export_node_as_image` - export a node (PNG, JPG, SVG, PDF)
+
+### MCP Prompts
+
+Helper prompts that guide the agent through common tasks:
+
+- `read_design_strategy` - the explore→modify ladder (glob/grep/query → read_node → edit_nodes)
+- `design_strategy` - best practices for creating designs
+- `text_replacement_strategy` - locating and bulk-replacing text, with chunked visual verification
+- `annotation_conversion_strategy` - converting manual annotations to native Figma annotations
+- `swap_overrides_instances` - transferring overrides between component instances
+- `reaction_to_connector_strategy` - turning prototype reactions into connector lines
+
+## Best Practices
+
+1. Join a channel before sending commands (`get_active_channel` → `join_channel`).
+2. **Locate before reading.** Start with `glob_nodes` (e.g. `{type:["SECTION","FRAME"]}` for a screen map), `grep_nodes`, or `query_nodes` to get ids — don't dump a whole subtree to find something.
+3. **Read narrowly.** `read_node` only the ids you'll act on; raise `depth` or re-request a stub id to zoom. Width of search is cheap (ids only); depth of detail is not.
+4. **Edit surgically.** Use `edit_nodes` with `old` as a guard against stale reads; batch many nodes in one call. Create subtrees with `write_nodes`.
+5. For large designs: narrow with `root`/`depth`/`within` and cap with `maxMatches` on the search tools; verify changes with targeted `export_node_as_image`.
+6. Prefer component instances for consistency; all commands can throw, so handle errors.
+
+## Development
+
+```bash
+bun install        # install dependencies
+bun run build      # build the MCP server (tsup → dist/)
+bun run dev        # build in watch mode
+```
+
+To run the server from your local checkout, point the MCP config at it:
 
 ```json
 {
@@ -122,126 +201,12 @@ To develop, update your mcp config to direct to your local directory.
 }
 ```
 
-## MCP Tools
+The Figma plugin is **not** bundled — edit `src/cursor_mcp_plugin/code.js` and `ui.html` directly.
 
-The MCP server provides the following tools for interacting with Figma:
+## Credits
 
-### Document & Selection
-
-- `get_selection` - Get information about the current selection
-- `read_my_design` - Get detailed node information about the current selection without parameters
-- `get_node_info` - Get detailed information about a specific node
-- `get_nodes_info` - Get detailed information about multiple nodes by providing an array of node IDs
-- `set_focus` - Set focus on a specific node by selecting it and scrolling viewport to it
-- `set_selections` - Set selection to multiple nodes and scroll viewport to show them
-
-### Annotations
-
-- `get_annotations` - Get all annotations in the current document or specific node
-- `set_annotations` - Create or update one or more annotations with markdown support; each entry independent, large batches chunked
-- `glob_nodes` - Flat type/name-glob index of a subtree, one node per line as `id:"name".TYPE @parent` (the filesystem-glob analog; useful for finding annotation targets)
-- `grep_nodes` - Regex search over the text content of a subtree, line-oriented (the grep analog); reports matching lines as `id:"name".TEXT @parent L<n>: <line>`
-- `query_nodes` - Structural search by field predicates (`{path, op, value}`, AND-combined) — match on any node-model field (fontSize, fills color, bound variables, etc.), including key presence via `exists`/`absent`
-
-### Editing Nodes
-
-- `edit_nodes` - Generic, path-addressed property writer — the write-side twin of `query_nodes`/`get_node_info`, an `Edit`-style tool for the Figma node model instead of text. Pass `edits: [{nodeId, path, old?, new}]`: `path` uses the same syntax as `query_nodes` (dot for objects, `[i]` for an index; no `[*]`), `new` is the value to set (`#RRGGBB` → Figma rgb; whole objects/arrays allowed), and the optional `old` is an Edit-style guard that rejects only that edit on mismatch. Edits run in order, are independent (a failure surfaces its Figma error and the rest still apply), and one call can touch many nodes. Common paths: `name`, `characters` (loads the font), `x`/`y`, `width`/`height` (resize), `cornerRadius`, `fills[0].color`, `opacity`, `layoutMode`, `paddingTop`, `itemSpacing`, `primaryAxisAlignItems`, `layoutSizingHorizontal`. Replaces the former single-purpose setters (`move_node`, `resize_node`, `set_corner_radius`, `set_text_content`, `set_multiple_text_contents`, `set_layout_mode`, `set_padding`, `set_axis_align`, `set_layout_sizing`, `set_item_spacing`). Bulk text replace = one `{nodeId, path: "characters", new: "..."}` per node in a single call.
-
-### Prototyping & Connections
-
-- `get_reactions` - Get all prototype reactions from nodes with visual highlight animation
-- `set_default_connector` - Set a copied FigJam connector as the default connector style for creating connections (must be set before creating connections)
-- `create_connections` - Create FigJam connector lines between nodes, based on prototype flows or custom mapping
-
-### Creating Elements
-
-- `create_rectangle` - Create a new rectangle with position, size, and optional name
-- `create_frame` - Create a new frame with position, size, and optional name
-- `create_text` - Create a new text node with customizable font properties
-
-### Styling
-
-> Colors and all other property edits (fills, strokes, text, layout, geometry, corner radius, padding, spacing, position, size) go through `edit_nodes` — e.g. set `fills` to `[{type:"SOLID",color:"#3366ff"}]`, or `strokes` + `strokeWeight`. See [Editing Nodes](#editing-nodes).
-
-### Layout & Organization
-
-- `delete_nodes` - Delete one or more nodes (chunked with progress for large batches)
-- `clone_node` - Create a copy of an existing node with optional position offset
-
-### Components & Styles
-
-- `get_styles` - Get information about local styles
-- `get_local_components` - Get information about local components
-- `create_component_instance` - Create an instance of a component
-- `get_instance_overrides` - Extract override properties from a selected component instance
-- `set_instance_overrides` - Apply extracted overrides to target instances
-
-### Export & Advanced
-
-- `export_node_as_image` - Export a node as an image (PNG, JPG, SVG, or PDF) - limited support on image currently returning base64 as text
-
-### Connection Management
-
-- `join_channel` - Join a specific channel to communicate with Figma
-
-### MCP Prompts
-
-The MCP server includes several helper prompts to guide you through complex design tasks:
-
-- `design_strategy` - Best practices for working with Figma designs
-- `read_design_strategy` - Best practices for reading Figma designs
-- `text_replacement_strategy` - Systematic approach for replacing text in Figma designs
-- `annotation_conversion_strategy` - Strategy for converting manual annotations to Figma's native annotations
-- `swap_overrides_instances` - Strategy for transferring overrides between component instances in Figma
-- `reaction_to_connector_strategy` - Strategy for converting Figma prototype reactions to connector lines using the output of 'get_reactions', and guiding the use 'create_connections' in sequence
-
-## Development
-
-### Building the Figma Plugin
-
-1. Navigate to the Figma plugin directory:
-
-   ```
-   cd src/cursor_mcp_plugin
-   ```
-
-2. Edit code.js and ui.html
-
-## Best Practices
-
-When working with the Figma MCP:
-
-1. Always join a channel before sending commands
-2. Get document overview using `glob_nodes` (e.g. `{depth:1}`) first
-3. Check current selection with `get_selection` before modifications
-4. Use appropriate creation tools based on needs:
-   - `create_frame` for containers
-   - `create_rectangle` for basic shapes
-   - `create_text` for text elements
-5. Verify changes using `get_node_info`
-6. Use component instances when possible for consistency
-7. Handle errors appropriately as all commands can throw exceptions
-8. For large designs:
-   - Narrow searches with `root`/`depth`/`within` and cap results with `maxMatches` in `glob_nodes`/`grep_nodes`/`query_nodes`
-   - Monitor progress through WebSocket updates
-   - Implement appropriate error handling
-9. For text operations:
-   - Use batch operations when possible
-   - Consider structural relationships
-   - Verify changes with targeted exports
-10. For converting legacy annotations:
-    - Scan text nodes to identify numbered markers and descriptions
-    - Use `glob_nodes` to find UI elements that annotations refer to
-    - Match markers with their target elements using path, name, or proximity
-    - Categorize annotations appropriately with `get_annotations`
-    - Create native annotations with `set_annotations` in one batch
-    - Verify all annotations are properly linked to their targets
-    - Delete legacy annotation nodes after successful conversion
-11. Visualize prototype noodles as FigJam connectors:
-
-- Use `get_reactions` to extract prototype flows,
-- set a default connector with `set_default_connector`,
-- and generate connector lines with `create_connections` for clear visual flow mapping.
+- Original project: [sonnylazuardi/cursor-talk-to-figma-mcp](https://github.com/sonnylazuardi/cursor-talk-to-figma-mcp).
+- Bulk text replacement and instance-override propagation features by [@dusskapark](https://github.com/dusskapark) ([text demo](https://www.youtube.com/watch?v=j05gGT3xfCs), [overrides demo](https://youtu.be/uvuT8LByroI)).
 
 ## License
 
