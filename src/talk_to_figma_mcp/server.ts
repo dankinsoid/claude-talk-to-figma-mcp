@@ -2108,16 +2108,16 @@ server.tool(
 
 // Convert existing nodes into a different kind of node, in place
 server.tool(
-  "transform_nodes",
-  "Transform existing nodes in place — four operations that write_nodes/edit_nodes can't express. `flatten`: merge ALL nodeIds into one VectorNode (overlaps/strokes baked into a single path). `outline_stroke`: per node, create a new vector of the stroke rendered as fills (the original node is left untouched); skipped when a node has no stroke. `to_component`: per node, convert a FRAME/GROUP/etc into a COMPONENT preserving its children (unlike a write_nodes COMPONENT, which starts empty). `detach`: per node, detach an INSTANCE into a standalone FRAME. Returns the new node id(s) — ids change for flatten/to_component/detach.",
+  "convert_nodes",
+  "Convert existing nodes into a different kind of node, in place — four operations that write_nodes/edit_nodes can't express (this is NOT rotate/scale; for those set `rotation` or `width`/`height` via edit_nodes). `flatten`: merge ALL nodeIds into one VectorNode (overlaps/strokes baked into a single path). `outline_stroke`: per node, create a new vector of the stroke rendered as fills (the original node is left untouched); skipped when a node has no stroke. `to_component`: per node, convert a FRAME/GROUP/etc into a COMPONENT preserving its children (unlike a write_nodes COMPONENT, which starts empty). `detach`: per node, detach an INSTANCE into a standalone FRAME. Returns the new node id(s) — ids change for flatten/to_component/detach.",
   {
     operation: z
       .enum(["flatten", "outline_stroke", "to_component", "detach"])
-      .describe("Which transform to apply"),
+      .describe("Which conversion to apply"),
     nodeIds: z
       .array(z.string())
       .min(1)
-      .describe("Nodes to transform. `flatten` merges all of them into one; the other ops map 1:1."),
+      .describe("Nodes to convert. `flatten` merges all of them into one; the other ops map 1:1."),
     name: z
       .string()
       .optional()
@@ -2129,7 +2129,7 @@ server.tool(
   },
   async ({ operation, nodeIds, name, parentId }: any) => {
     try {
-      const result: any = await sendCommandToFigma("transform_nodes", { operation, nodeIds, name, parentId });
+      const result: any = await sendCommandToFigma("convert_nodes", { operation, nodeIds, name, parentId });
       const lines = (result.results || []).map((r: any) =>
         r.newId
           ? `${r.oldId || (r.oldIds || []).join("+")} → ${r.newId}${r.name ? ` "${r.name}"` : ""}${r.type ? ` (${r.type})` : ""}`
@@ -2139,7 +2139,7 @@ server.tool(
         content: [
           {
             type: "text",
-            text: `transform_nodes (${operation}):\n${lines.join("\n")}`,
+            text: `convert_nodes (${operation}):\n${lines.join("\n")}`,
           },
         ],
       };
@@ -2626,7 +2626,7 @@ type FigmaCommand =
   | "set_selections"
   | "combine_as_variants"
   | "boolean_operation"
-  | "transform_nodes"
+  | "convert_nodes"
   | "list_fonts"
   | "style_text_range"
   | "edit_groups"
@@ -2753,7 +2753,7 @@ type CommandParams = {
     name?: string;
     parentId?: string;
   };
-  transform_nodes: {
+  convert_nodes: {
     operation: "flatten" | "outline_stroke" | "to_component" | "detach";
     nodeIds: string[];
     name?: string;

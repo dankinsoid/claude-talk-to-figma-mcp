@@ -288,8 +288,9 @@ async function handleCommand(command, params) {
       return await setVariables(params);
     case "bind_variables":
       return await bindVariables(params);
-    case "transform_nodes":
-      return await transformNodes(params);
+    case "convert_nodes":
+    case "transform_nodes": // legacy alias (pre-rename servers)
+      return await convertNodes(params);
     case "list_fonts":
       return await listFonts(params);
     case "style_text_range":
@@ -3960,19 +3961,19 @@ async function booleanOperation(params) {
 //  - to_component:   figma.createComponentFromNode(node) — per node; replaces the node
 //      with a COMPONENT preserving its children (createComponent makes an empty one).
 //  - detach:         instance.detachInstance() — per node; INSTANCE -> standalone FRAME.
-async function transformNodes(params) {
+async function convertNodes(params) {
   const { operation, nodeIds, name, parentId } = params || {};
   const OPS = ["flatten", "outline_stroke", "to_component", "detach"];
   if (OPS.indexOf(operation) === -1) {
-    throw new Error(`transform_nodes requires \`operation\` one of: ${OPS.join(", ")}`);
+    throw new Error(`convert_nodes requires \`operation\` one of: ${OPS.join(", ")}`);
   }
   if (!Array.isArray(nodeIds) || nodeIds.length === 0) {
-    throw new Error("transform_nodes requires a non-empty `nodeIds` array");
+    throw new Error("convert_nodes requires a non-empty `nodeIds` array");
   }
 
   // Resolve pass (getNodeByIdAsync per id) + the per-node op loop below both run
   // under the 30s timeout; flatten has no op loop (single figma.flatten call).
-  const progress = makeProgress("transform_nodes", nodeIds.length + (operation === "flatten" ? 0 : nodeIds.length), { commandId: params && params.commandId, minItems: 5 });
+  const progress = makeProgress("convert_nodes", nodeIds.length + (operation === "flatten" ? 0 : nodeIds.length), { commandId: params && params.commandId, minItems: 5 });
   await progress.start(`Resolving ${nodeIds.length} nodes...`);
   let done = 0;
 
