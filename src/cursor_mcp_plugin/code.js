@@ -359,6 +359,16 @@ function filterFigmaNode(node) {
   if (node.opacity !== undefined && node.opacity !== 1) {
     filtered.opacity = node.opacity;
   }
+  // Geometry the server needs to cull non-rendering nodes: clipsContent bounds
+  // its descendants (anything fully outside is invisible); rotation makes a
+  // node's AABB overstate its real coverage, so it must not be treated as a
+  // clean opaque occluder.
+  if (node.clipsContent === true) {
+    filtered.clipsContent = true;
+  }
+  if (node.rotation) {
+    filtered.rotation = node.rotation;
+  }
 
   // Lets the server collapse repeated instances of the same component (consumed,
   // not echoed): the first instance is shown in full, later copies as a stub.

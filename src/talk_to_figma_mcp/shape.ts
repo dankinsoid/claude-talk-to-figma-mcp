@@ -39,6 +39,13 @@ export interface ShapeOptions {
    * differentiating text. Default true.
    */
   collapseRepeats?: boolean;
+  /**
+   * Cull nodes that are technically visible but render nowhere: fully clipped
+   * out by an ancestor's clipsContent, or fully covered by an opaque sibling
+   * above them. Culled nodes collapse to {id, clipped:true} / {id, occluded:true}.
+   * Default true.
+   */
+  cull?: boolean;
 }
 
 /** Leaf node types that count as "drawing" rather than content. */
@@ -110,6 +117,70 @@ function fillInfo(fills: any[]): { color?: string; gradient?: string[]; image?: 
   if (paint.type === "IMAGE") return { image: true };
   return null;
 }
+
+/** Axis-aligned bounding rect from a node's absolute box. */
+interface Rect {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+function rect(node: any): Rect | null {
+  const b = node.absoluteBoundingBox;
+  if (!b) return null;
+  return { x1: b.x, y1: b.y, x2: b.x + b.width, y2: b.y + b.height };
+}
+function intersect(a: Rect | null, b: Rect): Rect {
+  if (!a) return b;
+  return { x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1), x2: Math.min(a.x2, b.x2), y2: Math.min(a.y2, b.y2) };
+}
+/** r has no pixels inside the visible clip region. */
+function fullyOutside(clip: Rect, r: Rect): boolean {
+  return r.x2 <= clip.x1 || r.x1 >= clip.x2 || r.y2 <= clip.y1 || r.y1 >= clip.y2;
+}
+function contains(outer: Rect, inner: Rect): boolean {
+  return inner.x1 >= outer.x1 && inner.y1 >= outer.y1 && inner.x2 <= outer.x2 && inner.y2 <= outer.y2;
+}
+
+/**
+ * True only when this node is guaranteed to paint every pixel of its box fully
+ * opaque: a single opaque SOLID fill, no layer transparency, no rounded corners
+ * (which leave uncovered pixels), no rotation (which makes the AABB overstate
+ * coverage). Deliberately strict — a false positive would erase a visible node.
+ */
+function opaqueCover(node: any): boolean {
+  if (node.rotation) return false;
+  if (node.cornerRadius) return false;
+  if (node.opacity !== undefined && node.opacity !== 1) return false;
+  const fi = node.fills && fillInfo(node.fills);
+  // fillInfo drops the alpha pair when fully opaque, so a 7-char "#rrggbb" hex
+  // (no alpha) is the opaque case; "#rrggbbaa" carries transparency.
+  return !!(fi && fi.color && fi.color.length === 7);
+}
+
+/**
+ * Ids of children fully hidden behind an opaque later sibling (later in the
+ * array renders above). Conservative: only single-sibling full containment.
+ */
+function occludedSet(kids: any[]): Set<string> {
+  const covered = new Set<string>();
+  for (let i = 0; i < kids.length; i++) {
+    const cr = rect(kids[i]);
+    if (!cr) continue;
+    for (let j = i + 1; j < kids.length; j++) {
+      const o = kids[j];
+      if (o.visible === false || !opaqueCover(o)) continue;
+      const or = rect(o);
+      if (or && contains(or, cr)) {
+        covered.add(kids[i].id);
+        break;
+      }
+    }
+  }
+  return covered;
+}
+
+const NONE = new Set<string>();
 
 /** True if no TEXT node anywhere in the subtree. */
 function hasNoText(node: any): boolean {
@@ -330,7 +401,8 @@ function shapeRec(
   parent: Stack,
   expand: Set<string>,
   repeats: Set<string>,
-  templates: Map<string, any>
+  templates: Map<string, any>,
+  clip: Rect | null
 ): any {
   // Hidden nodes (except the requested root) collapse to a bare presence marker.
   if (curDepth > 0 && node.visible === false) return { id: node.id, hidden: true };
@@ -398,13 +470,25 @@ function shapeRec(
       out.childCount = kids.length;
       out.more = true; // drill in for the full copy
     } else if (expand.has(node.id)) {
+      // Clip region passed to children: intersect the inherited clip with this
+      // node's box when it clips its content. Occlusion is computed per sibling
+      // set (a later opaque sibling covers an earlier one).
+      const myRect = rect(node);
+      const childClip = opts.cull && node.clipsContent && myRect ? intersect(clip, myRect) : clip;
+      const covered = opts.cull ? occludedSet(kids) : NONE;
       // shapeRec handles each child's own state (icon / repeat / full); only
       // budget-truncated children (not in expand) become generic stubs.
-      out.children = kids.map((c) =>
-        expand.has(c.id)
-          ? shapeRec(c, opts, curDepth + 1, myStack, expand, repeats, templates)
-          : stubNode(c, opts.collapseIcons)
-      );
+      out.children = kids.map((c) => {
+        if (c.visible === false) return { id: c.id, hidden: true };
+        if (opts.cull && childClip) {
+          const r = rect(c);
+          if (r && fullyOutside(childClip, r)) return { id: c.id, clipped: true };
+        }
+        if (covered.has(c.id)) return { id: c.id, occluded: true };
+        return expand.has(c.id)
+          ? shapeRec(c, opts, curDepth + 1, myStack, expand, repeats, templates, childClip)
+          : stubNode(c, opts.collapseIcons);
+      });
     } else {
       // Node itself reached the budget edge — surface as a stub in place.
       out.childCount = kids.length;
@@ -424,8 +508,9 @@ export function shapeNode(node: any, options: ShapeOptions = {}): any {
     depth: options.depth ?? Infinity,
     collapseIcons: options.collapseIcons ?? true,
     collapseRepeats: options.collapseRepeats ?? true,
+    cull: options.cull ?? true,
   };
   const { collapsed, templates } = planRepeats(node, opts.collapseRepeats);
   const expand = planExpansion(node, opts, collapsed);
-  return shapeRec(node, opts, 0, null, expand, collapsed, templates);
+  return shapeRec(node, opts, 0, null, expand, collapsed, templates, null);
 }

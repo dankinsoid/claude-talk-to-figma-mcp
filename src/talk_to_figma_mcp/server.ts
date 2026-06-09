@@ -212,6 +212,10 @@ const shapeParams = {
     .boolean()
     .optional()
     .describe("Collapse repeated instances of the same component: the first renders in full, later copies become a stub with their props/text and more:true (default true)."),
+  cull: z
+    .boolean()
+    .optional()
+    .describe("Drop nodes that render nowhere — fully clipped out by an ancestor's clipsContent ({id, clipped:true}) or fully covered by an opaque sibling above ({id, occluded:true}). Default true."),
 };
 
 type ShapeArgs = {
@@ -219,6 +223,7 @@ type ShapeArgs = {
   depth?: number;
   collapseIcons?: boolean;
   collapseRepeats?: boolean;
+  cull?: boolean;
 };
 
 // Read My Design Tool
@@ -229,9 +234,9 @@ server.tool(
     ...shapeParams,
     ...saveParams,
   },
-  async ({ maxNodes, depth, collapseIcons, collapseRepeats, saveToFile, outputPath }: any) => {
+  async ({ maxNodes, depth, collapseIcons, collapseRepeats, cull, saveToFile, outputPath }: any) => {
     try {
-      const opts: ShapeArgs = { maxNodes, depth, collapseIcons, collapseRepeats };
+      const opts: ShapeArgs = { maxNodes, depth, collapseIcons, collapseRepeats, cull };
       const result = await sendCommandToFigma("read_my_design", {});
       const shaped = Array.isArray(result)
         ? result.map((r: any) => (r && r.document ? { ...r, document: shapeNode(r.document, opts) } : r))
@@ -262,10 +267,10 @@ server.tool(
     ...shapeParams,
     ...saveParams,
   },
-  async ({ nodeId, maxNodes, depth, collapseIcons, collapseRepeats, saveToFile, outputPath }: any) => {
+  async ({ nodeId, maxNodes, depth, collapseIcons, collapseRepeats, cull, saveToFile, outputPath }: any) => {
     try {
       const result = await sendCommandToFigma("get_node_info", { nodeId });
-      const shaped = shapeNode(result, { maxNodes, depth, collapseIcons, collapseRepeats });
+      const shaped = shapeNode(result, { maxNodes, depth, collapseIcons, collapseRepeats, cull });
       return {
         content: [await jsonContent(shaped, { saveToFile, outputPath }, "node-info")]
       };
@@ -395,9 +400,9 @@ server.tool(
     ...shapeParams,
     ...saveParams,
   },
-  async ({ nodeIds, maxNodes, depth, collapseIcons, collapseRepeats, saveToFile, outputPath }: any) => {
+  async ({ nodeIds, maxNodes, depth, collapseIcons, collapseRepeats, cull, saveToFile, outputPath }: any) => {
     try {
-      const opts: ShapeArgs = { maxNodes, depth, collapseIcons, collapseRepeats };
+      const opts: ShapeArgs = { maxNodes, depth, collapseIcons, collapseRepeats, cull };
       const results = await Promise.all(
         nodeIds.map(async (nodeId: any) => {
           const result = await sendCommandToFigma('get_node_info', { nodeId });
