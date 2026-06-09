@@ -772,6 +772,41 @@ server.tool(
   }
 );
 server.tool(
+  "edit_nodes",
+  "Edit node properties directly in the node model \u2014 the write-side twin of query_nodes/get_node_info, an Edit tool for Figma JSON instead of text. Pass `edits`: an array of `{nodeId, path, old?, new}`. `path` addresses one field the same way query_nodes does \u2014 dot for objects, `[i]` for an array index (e.g. `name`, `cornerRadius`, `fills[0].color`, `fills[0].opacity`); no `[*]` (a write needs one concrete target). `new` is the value to set: colors as `#RRGGBB` are converted to Figma's rgb 0-1, and whole objects/arrays are allowed (e.g. set `fills[0]` to a full paint). `old` is an OPTIONAL guard, exactly like the old_string in Edit \u2014 if given and it doesn't match the current value (colors compared as hex, numbers tolerantly), that one edit is rejected so you never blind-overwrite a stale read. Edits run in order and are INDEPENDENT: one failing \u2014 guard mismatch, read-only/derived prop, a type Figma rejects, font not loaded \u2014 records its Figma error and the rest still apply. The result lists each edit as `\u2713 id path: old \u2192 new` or `\u2717 id path: <error>`, so a failure tells you exactly what to fix. One call can touch many nodes (each edit names its own `nodeId`). Note width/height resize and `characters` loads the font. nodeId accepts short ids (n0, ...) or full Figma ids.",
+  {
+    edits: import_zod.z.array(
+      import_zod.z.object({
+        nodeId: import_zod.z.string().describe("Node to edit. Short ids (n0, ...) or full Figma ids."),
+        path: import_zod.z.string().describe('Field path to write. Dot for objects, [i] for an array index. Same syntax as query_nodes, but no [*]. E.g. "name", "cornerRadius", "fills[0].color".'),
+        old: import_zod.z.any().optional().describe("Optional guard: expected current value (Edit-style). Colors as #RRGGBB. Mismatch rejects only this edit."),
+        new: import_zod.z.any().describe("Value to set. #RRGGBB \u2192 Figma rgb; numbers/strings/objects/arrays allowed.")
+      })
+    ).min(1).describe("Edits applied in order; each independent \u2014 one failing does not abort the rest.")
+  },
+  async ({ edits }) => {
+    try {
+      const result = await sendCommandToFigma("edit_nodes", { edits });
+      const fmt = (v) => v === null || v === void 0 ? "(absent)" : typeof v === "object" ? JSON.stringify(v) : String(v);
+      const rows = (result?.results || []).map((r) => {
+        const id = renumberIds({ id: r.nodeId }).id;
+        return r.ok ? `\u2713 ${id} ${r.path}: ${fmt(r.old)} \u2192 ${fmt(r.new)}` : `\u2717 ${id} ${r.path}: ${r.error}`;
+      });
+      const text = `applied ${result?.applied || 0}/${result?.total || 0}` + (rows.length ? "\n" + rows.join("\n") : "");
+      return { content: [{ type: "text", text }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error editing nodes: ${error instanceof Error ? error.message : String(error)}`
+          }
+        ]
+      };
+    }
+  }
+);
+server.tool(
   "get_nodes_info",
   "Get information about multiple nodes in Figma, compacted for low token cost. Same depth/collapse controls as get_node_info.",
   {
