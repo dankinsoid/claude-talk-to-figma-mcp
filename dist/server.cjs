@@ -2808,6 +2808,80 @@ server.tool(
   }
 );
 server.tool(
+  "write_table",
+  "Create a FigJam TABLE (FigJam files only) of `rows`\xD7`columns` cells, optionally filling cell text. Cells are 0-indexed via {row, column, text}; omitted cells stay empty. A table is a FigJam-native 2D grid, so write_nodes can't build it. Use edit_table afterwards to add/remove/resize rows & columns or change cell text.",
+  {
+    rows: import_zod4.z.number().int().min(1).describe("number of rows"),
+    columns: import_zod4.z.number().int().min(1).describe("number of columns"),
+    cells: import_zod4.z.array(
+      import_zod4.z.object({
+        row: import_zod4.z.number().int().min(0),
+        column: import_zod4.z.number().int().min(0),
+        text: import_zod4.z.string()
+      })
+    ).optional().describe("cell contents, 0-indexed (row, column); omitted cells stay empty"),
+    parentId: import_zod4.z.string().optional().describe("container to place the table in; defaults to current page"),
+    index: import_zod4.z.number().int().min(0).optional().describe("position among siblings"),
+    x: import_zod4.z.number().optional().describe("x position (ignored inside an auto-layout parent)"),
+    y: import_zod4.z.number().optional().describe("y position (ignored inside an auto-layout parent)"),
+    name: import_zod4.z.string().optional().describe("name for the table node")
+  },
+  async ({ rows, columns, cells, parentId: parentId2, index: index2, x, y, name }) => {
+    try {
+      const result = await sendCommandToFigma("write_table", { rows, columns, cells, parentId: parentId2, index: index2, x, y, name });
+      const warn = result.cellErrors?.length ? ` (${result.cellErrors.length} cell error(s): ${result.cellErrors.map((e) => `(${e.row},${e.column}) ${e.error}`).join("; ")})` : "";
+      return {
+        content: [
+          { type: "text", text: `Created TABLE "${result.name}" (ID: ${result.id}) \u2014 ${result.numRows}\xD7${result.numColumns}.${warn}` }
+        ]
+      };
+    } catch (error) {
+      return {
+        content: [
+          { type: "text", text: `Error creating table: ${error instanceof Error ? error.message : String(error)}` }
+        ]
+      };
+    }
+  }
+);
+server.tool(
+  "edit_table",
+  "Mutate an existing FigJam TABLE: append rows/columns, remove rows/columns by index, resize them, and/or set cell text. Operations apply in a fixed order \u2014 addColumns, addRows, removeColumns, removeRows, resizeColumns, resizeRows, then cells \u2014 so cell coordinates and resize indices refer to the resulting grid. Removes run high-index-first, so a list like [1,3] is safe.",
+  {
+    tableId: import_zod4.z.string().describe("ID of the TABLE node to edit"),
+    addRows: import_zod4.z.number().int().min(0).optional().describe("append this many rows at the bottom"),
+    addColumns: import_zod4.z.number().int().min(0).optional().describe("append this many columns at the right"),
+    removeRows: import_zod4.z.array(import_zod4.z.number().int().min(0)).optional().describe("row indices to remove (0-indexed)"),
+    removeColumns: import_zod4.z.array(import_zod4.z.number().int().min(0)).optional().describe("column indices to remove (0-indexed)"),
+    resizeRows: import_zod4.z.array(import_zod4.z.object({ index: import_zod4.z.number().int().min(0), height: import_zod4.z.number().positive() })).optional().describe("set row heights by index"),
+    resizeColumns: import_zod4.z.array(import_zod4.z.object({ index: import_zod4.z.number().int().min(0), width: import_zod4.z.number().positive() })).optional().describe("set column widths by index"),
+    cells: import_zod4.z.array(
+      import_zod4.z.object({
+        row: import_zod4.z.number().int().min(0),
+        column: import_zod4.z.number().int().min(0),
+        text: import_zod4.z.string()
+      })
+    ).optional().describe("cell contents to set, 0-indexed against the resulting grid")
+  },
+  async (args2) => {
+    try {
+      const result = await sendCommandToFigma("edit_table", args2);
+      const warn = result.errors?.length ? ` (${result.errors.length} error(s): ${result.errors.map((e) => `${e.op}: ${e.error}`).join("; ")})` : "";
+      return {
+        content: [
+          { type: "text", text: `Edited TABLE "${result.name}" (ID: ${result.id}) \u2014 now ${result.numRows}\xD7${result.numColumns}.${warn}` }
+        ]
+      };
+    } catch (error) {
+      return {
+        content: [
+          { type: "text", text: `Error editing table: ${error instanceof Error ? error.message : String(error)}` }
+        ]
+      };
+    }
+  }
+);
+server.tool(
   "get_variables",
   "Read local Figma variables (design tokens): every variable collection, its modes, and each variable's per-mode value. Colors come back as hex, and aliases (variables referencing other variables) resolve to {alias: <target name>, aliasId}. Use this to discover token names/ids before binding or updating them. Pass `collection` to filter to one collection by name or id.",
   {

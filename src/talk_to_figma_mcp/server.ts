@@ -2000,6 +2000,100 @@ server.tool(
   }
 );
 
+// FigJam tables: a 2D grid that write_nodes can't express (its `children` is a
+// flat list). FigJam files only.
+server.tool(
+  "write_table",
+  "Create a FigJam TABLE (FigJam files only) of `rows`×`columns` cells, optionally filling cell text. Cells are 0-indexed via {row, column, text}; omitted cells stay empty. A table is a FigJam-native 2D grid, so write_nodes can't build it. Use edit_table afterwards to add/remove/resize rows & columns or change cell text.",
+  {
+    rows: z.number().int().min(1).describe("number of rows"),
+    columns: z.number().int().min(1).describe("number of columns"),
+    cells: z
+      .array(
+        z.object({
+          row: z.number().int().min(0),
+          column: z.number().int().min(0),
+          text: z.string(),
+        })
+      )
+      .optional()
+      .describe("cell contents, 0-indexed (row, column); omitted cells stay empty"),
+    parentId: z.string().optional().describe("container to place the table in; defaults to current page"),
+    index: z.number().int().min(0).optional().describe("position among siblings"),
+    x: z.number().optional().describe("x position (ignored inside an auto-layout parent)"),
+    y: z.number().optional().describe("y position (ignored inside an auto-layout parent)"),
+    name: z.string().optional().describe("name for the table node"),
+  },
+  async ({ rows, columns, cells, parentId, index, x, y, name }: any) => {
+    try {
+      const result: any = await sendCommandToFigma("write_table", { rows, columns, cells, parentId, index, x, y, name });
+      const warn = result.cellErrors?.length
+        ? ` (${result.cellErrors.length} cell error(s): ${result.cellErrors.map((e: any) => `(${e.row},${e.column}) ${e.error}`).join("; ")})`
+        : "";
+      return {
+        content: [
+          { type: "text", text: `Created TABLE "${result.name}" (ID: ${result.id}) — ${result.numRows}×${result.numColumns}.${warn}` },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          { type: "text", text: `Error creating table: ${error instanceof Error ? error.message : String(error)}` },
+        ],
+      };
+    }
+  }
+);
+
+server.tool(
+  "edit_table",
+  "Mutate an existing FigJam TABLE: append rows/columns, remove rows/columns by index, resize them, and/or set cell text. Operations apply in a fixed order — addColumns, addRows, removeColumns, removeRows, resizeColumns, resizeRows, then cells — so cell coordinates and resize indices refer to the resulting grid. Removes run high-index-first, so a list like [1,3] is safe.",
+  {
+    tableId: z.string().describe("ID of the TABLE node to edit"),
+    addRows: z.number().int().min(0).optional().describe("append this many rows at the bottom"),
+    addColumns: z.number().int().min(0).optional().describe("append this many columns at the right"),
+    removeRows: z.array(z.number().int().min(0)).optional().describe("row indices to remove (0-indexed)"),
+    removeColumns: z.array(z.number().int().min(0)).optional().describe("column indices to remove (0-indexed)"),
+    resizeRows: z
+      .array(z.object({ index: z.number().int().min(0), height: z.number().positive() }))
+      .optional()
+      .describe("set row heights by index"),
+    resizeColumns: z
+      .array(z.object({ index: z.number().int().min(0), width: z.number().positive() }))
+      .optional()
+      .describe("set column widths by index"),
+    cells: z
+      .array(
+        z.object({
+          row: z.number().int().min(0),
+          column: z.number().int().min(0),
+          text: z.string(),
+        })
+      )
+      .optional()
+      .describe("cell contents to set, 0-indexed against the resulting grid"),
+  },
+  async (args: any) => {
+    try {
+      const result: any = await sendCommandToFigma("edit_table", args);
+      const warn = result.errors?.length
+        ? ` (${result.errors.length} error(s): ${result.errors.map((e: any) => `${e.op}: ${e.error}`).join("; ")})`
+        : "";
+      return {
+        content: [
+          { type: "text", text: `Edited TABLE "${result.name}" (ID: ${result.id}) — now ${result.numRows}×${result.numColumns}.${warn}` },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          { type: "text", text: `Error editing table: ${error instanceof Error ? error.message : String(error)}` },
+        ],
+      };
+    }
+  }
+);
+
 // ---- Variables / design tokens ----
 
 server.tool(
@@ -2247,6 +2341,8 @@ type FigmaCommand =
   | "combine_as_variants"
   | "boolean_operation"
   | "edit_groups"
+  | "write_table"
+  | "edit_table"
   | "get_variables"
   | "set_variables"
   | "bind_variables";
@@ -2368,6 +2464,26 @@ type CommandParams = {
     nodeIds: string[];
     name?: string;
     parentId?: string;
+  };
+  write_table: {
+    rows: number;
+    columns: number;
+    cells?: Array<{ row: number; column: number; text: string }>;
+    parentId?: string;
+    index?: number;
+    x?: number;
+    y?: number;
+    name?: string;
+  };
+  edit_table: {
+    tableId: string;
+    addRows?: number;
+    addColumns?: number;
+    removeRows?: number[];
+    removeColumns?: number[];
+    resizeRows?: Array<{ index: number; height: number }>;
+    resizeColumns?: Array<{ index: number; width: number }>;
+    cells?: Array<{ row: number; column: number; text: string }>;
   };
   get_variables: {
     collection?: string;

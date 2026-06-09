@@ -272,6 +272,10 @@ async function handleCommand(command, params) {
       return await booleanOperation(params);
     case "edit_groups":
       return await editGroups(params);
+    case "write_table":
+      return await writeTable(params);
+    case "edit_table":
+      return await editTable(params);
     case "get_variables":
       return await getVariables(params);
     case "set_variables":
@@ -3473,6 +3477,98 @@ async function editGroups(params) {
   }
 
   throw new Error("edit_groups requires `operation` one of: group, ungroup");
+}
+
+// ---- Tables (FigJam) ----
+
+// Set one cell's text. Coordinates are 0-indexed; text lives on the cell's
+// `.text` TextSublayer, so setCharacters loads its font before writing.
+async function setTableCellText(table, cell) {
+  if (!cell || typeof cell.row !== "number" || typeof cell.column !== "number") {
+    throw new Error("cell needs numeric `row` and `column`");
+  }
+  if (cell.row < 0 || cell.row >= table.numRows || cell.column < 0 || cell.column >= table.numColumns) {
+    throw new Error(`cell (${cell.row},${cell.column}) out of bounds for ${table.numRows}x${table.numColumns} table`);
+  }
+  await setCharacters(table.cellAt(cell.row, cell.column).text, String(cell.text == null ? "" : cell.text));
+}
+
+async function writeTable(params) {
+  if (figma.editorType !== "figjam") {
+    throw new Error(`write_table requires a FigJam file (current editor: ${figma.editorType})`);
+  }
+  const { rows, columns, cells, parentId, index, x, y, name } = params || {};
+  const r = Math.floor(Number(rows));
+  const c = Math.floor(Number(columns));
+  if (!(r >= 1) || !(c >= 1)) throw new Error("write_table requires rows >= 1 and columns >= 1");
+
+  const table = figma.createTable(r, c);
+
+  let parent = figma.currentPage;
+  if (parentId) {
+    const p = await figma.getNodeByIdAsync(parentId);
+    if (!p) throw new Error(`Parent not found: ${parentId}`);
+    if (!("appendChild" in p)) throw new Error(`Parent ${parentId} cannot have children`);
+    parent = p;
+  }
+  if (typeof index === "number" && "insertChild" in parent) parent.insertChild(index, table);
+  else parent.appendChild(table);
+  if (typeof x === "number") table.x = x;
+  if (typeof y === "number") table.y = y;
+  if (typeof name === "string" && name) table.name = name;
+
+  const cellErrors = [];
+  if (Array.isArray(cells)) {
+    for (const cell of cells) {
+      try {
+        await setTableCellText(table, cell);
+      } catch (err) {
+        cellErrors.push({ row: cell && cell.row, column: cell && cell.column, error: err && err.message ? err.message : String(err) });
+      }
+    }
+  }
+
+  const result = { success: true, id: table.id, name: table.name, type: table.type, numRows: table.numRows, numColumns: table.numColumns };
+  if (cellErrors.length) result.cellErrors = cellErrors;
+  return result;
+}
+
+async function editTable(params) {
+  const { tableId, addRows, addColumns, removeRows, removeColumns, resizeRows, resizeColumns, cells } = params || {};
+  if (!tableId) throw new Error("edit_table requires `tableId`");
+  const table = await figma.getNodeByIdAsync(tableId);
+  if (!table) throw new Error(`Table not found: ${tableId}`);
+  if (table.type !== "TABLE") throw new Error(`Node ${tableId} is ${table.type}, not a TABLE`);
+
+  const errors = [];
+  const tryOp = (label, fn) => {
+    try { fn(); } catch (err) { errors.push({ op: label, error: err && err.message ? err.message : String(err) }); }
+  };
+
+  // Fixed order so indices stay predictable: grow, then shrink (high-index-first
+  // so a list like [1,3] doesn't shift under itself), then resize, then fill.
+  const nAddCols = Math.max(0, Math.floor(Number(addColumns) || 0));
+  const nAddRows = Math.max(0, Math.floor(Number(addRows) || 0));
+  for (let i = 0; i < nAddCols; i++) tryOp("addColumns", () => table.insertColumn(table.numColumns));
+  for (let i = 0; i < nAddRows; i++) tryOp("addRows", () => table.insertRow(table.numRows));
+  if (Array.isArray(removeColumns)) for (const idx of [...removeColumns].sort((a, b) => b - a)) tryOp(`removeColumn ${idx}`, () => table.removeColumn(idx));
+  if (Array.isArray(removeRows)) for (const idx of [...removeRows].sort((a, b) => b - a)) tryOp(`removeRow ${idx}`, () => table.removeRow(idx));
+  if (Array.isArray(resizeColumns)) for (const rc of resizeColumns) tryOp(`resizeColumn ${rc && rc.index}`, () => table.resizeColumn(rc.index, rc.width));
+  if (Array.isArray(resizeRows)) for (const rr of resizeRows) tryOp(`resizeRow ${rr && rr.index}`, () => table.resizeRow(rr.index, rr.height));
+
+  if (Array.isArray(cells)) {
+    for (const cell of cells) {
+      try {
+        await setTableCellText(table, cell);
+      } catch (err) {
+        errors.push({ op: `cell (${cell && cell.row},${cell && cell.column})`, error: err && err.message ? err.message : String(err) });
+      }
+    }
+  }
+
+  const result = { success: true, id: table.id, name: table.name, type: table.type, numRows: table.numRows, numColumns: table.numColumns };
+  if (errors.length) result.errors = errors;
+  return result;
 }
 
 // ---- Variables / design tokens ----
