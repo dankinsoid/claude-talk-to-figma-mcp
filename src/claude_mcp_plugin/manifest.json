@@ -1,5 +1,5 @@
 {
-  "name": "Cursor MCP Plugin",
+  "name": "Claude MCP Plugin",
   "api": "1.0.0",
   "main": "code.js",
   "ui": "ui.html",
@@ -12,7 +12,7 @@
     "allowedDomains": [
       "ws://localhost:3055"
     ],
-    "reasoning": "Connects to a local Cursor MCP relay.",
+    "reasoning": "Connects to a local MCP relay.",
     "devAllowedDomains": [
       "http://localhost:3055",
       "ws://localhost:3055"

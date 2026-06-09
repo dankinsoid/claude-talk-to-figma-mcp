@@ -553,7 +553,7 @@
 
         // Add instructions for localhost when disconnected
         if (!isConnected) {
-          statusMessage += `<br><br>Run this in your terminal, then connect<br><code>bunx cursor-talk-to-figma-socket</code>`;
+          statusMessage += `<br><br>Run this in your terminal, then connect<br><code>bunx claude-talk-to-figma-socket</code>`;
         }
 
         connectionStatus.innerHTML = statusMessage;
@@ -1040,7 +1040,7 @@
           mcpServers: {
             TalkToFigma: {
               command: "bunx",
-              args: ["cursor-talk-to-figma-mcp@latest"],
+              args: ["@dankinsoid/claude-talk-to-figma-mcp@latest"],
             },
           },
         };

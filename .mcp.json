@@ -4,7 +4,7 @@
       "command": "bun",
       "args": [
         "run",
-        "/Users/danil/Code/cursor-talk-to-figma-mcp/dist/server.js"
+        "/Users/danil/Code/claude-talk-to-figma-mcp/dist/server.js"
       ]
     }
   }

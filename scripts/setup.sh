@@ -5,7 +5,7 @@ MCP_CONFIG='{
     "TalkToFigma": {
       "command": "bunx",
       "args": [
-        "@dankinsoid/cursor-talk-to-figma-mcp@latest"
+        "@dankinsoid/claude-talk-to-figma-mcp@latest"
       ]
     }
   }

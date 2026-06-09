@@ -1,12 +1,12 @@
 # Talk to Figma MCP
 
-A Model Context Protocol (MCP) integration between an AI agent (Cursor, Claude Code) and Figma, letting the agent read and modify designs programmatically.
+A Model Context Protocol (MCP) integration between an AI agent (Claude Code and other MCP clients) and Figma, letting the agent read and modify designs programmatically.
 
 https://github.com/user-attachments/assets/129a14d2-ed73-470f-9a4c-2240b2a4885c
 
-## Based on `sonnylazuardi/cursor-talk-to-figma-mcp`
+## Based on `grab/cursor-talk-to-figma-mcp`
 
-This is a fork of [sonnylazuardi/cursor-talk-to-figma-mcp](https://github.com/sonnylazuardi/cursor-talk-to-figma-mcp). It has diverged substantially. The original worked, but in practice it was slow, expensive, and limited:
+This is a fork of [grab/cursor-talk-to-figma-mcp](https://github.com/grab/cursor-talk-to-figma-mcp) (itself based on the original by [sonnylazuardi](https://github.com/sonnylazuardi/cursor-talk-to-figma-mcp)). It has diverged substantially. The upstream worked, but in practice it was slow, expensive, and limited:
 
 - it fed the model **near-complete node JSON** for every read — thousands of tokens per node, with full geometry, paints and styles the agent rarely needed;
 - **search was rigid** — a couple of fixed scans (by type, by text node) that returned heavy results; anything beyond them meant dumping a whole subtree and scanning it by eye;
@@ -26,7 +26,7 @@ This fork reworks the agent's interface around how an AI agent already works wit
 ## Project Structure
 
 - `src/talk_to_figma_mcp/` - TypeScript MCP server for Figma integration
-- `src/cursor_mcp_plugin/` - Figma plugin for communicating with the agent
+- `src/claude_mcp_plugin/` - Figma plugin for communicating with the agent
 - `src/socket.ts` - WebSocket server that relays messages between the MCP server and the Figma plugin
 
 ## How to use
@@ -51,7 +51,7 @@ bun socket
 
 4. Install the Figma plugin — see [Figma Plugin](#figma-plugin) below. (Install locally: this fork ships a modified plugin, so the upstream community listing won't include the changes above.)
 
-5. Run the plugin in Figma, join a channel, then drive it from Cursor or Claude Code.
+5. Run the plugin in Figma, join a channel, then drive it from your agent.
 
 ## Manual Setup and Installation
 
@@ -64,7 +64,7 @@ Add the server to your MCP config (`~/.cursor/mcp.json` for Cursor, `.mcp.json` 
   "mcpServers": {
     "TalkToFigma": {
       "command": "bunx",
-      "args": ["@dankinsoid/cursor-talk-to-figma-mcp@latest"]
+      "args": ["@dankinsoid/claude-talk-to-figma-mcp@latest"]
     }
   }
 }
@@ -73,7 +73,7 @@ Add the server to your MCP config (`~/.cursor/mcp.json` for Cursor, `.mcp.json` 
 Or via the Claude Code CLI:
 
 ```bash
-claude mcp add TalkToFigma -- bunx @dankinsoid/cursor-talk-to-figma-mcp@latest
+claude mcp add TalkToFigma -- bunx @dankinsoid/claude-talk-to-figma-mcp@latest
 ```
 
 ### WebSocket Server
@@ -86,7 +86,7 @@ bun socket
 
 1. In Figma, go to Plugins > Development > New Plugin
 2. Choose "Link existing plugin"
-3. Select `src/cursor_mcp_plugin/manifest.json`
+3. Select `src/claude_mcp_plugin/manifest.json`
 4. The plugin is now available under your Figma development plugins
 
 ## Windows + WSL Guide
@@ -201,11 +201,11 @@ To run the server from your local checkout, point the MCP config at it:
 }
 ```
 
-The Figma plugin is **not** bundled — edit `src/cursor_mcp_plugin/code.js` and `ui.html` directly.
+The Figma plugin is **not** bundled — edit `src/claude_mcp_plugin/code.js` and `ui.html` directly.
 
 ## Credits
 
-- Original project: [sonnylazuardi/cursor-talk-to-figma-mcp](https://github.com/sonnylazuardi/cursor-talk-to-figma-mcp).
+- Upstream: [grab/cursor-talk-to-figma-mcp](https://github.com/grab/cursor-talk-to-figma-mcp); original by [sonnylazuardi](https://github.com/sonnylazuardi/cursor-talk-to-figma-mcp).
 - Bulk text replacement and instance-override propagation features by [@dusskapark](https://github.com/dusskapark) ([text demo](https://www.youtube.com/watch?v=j05gGT3xfCs), [overrides demo](https://youtu.be/uvuT8LByroI)).
 
 ## License
