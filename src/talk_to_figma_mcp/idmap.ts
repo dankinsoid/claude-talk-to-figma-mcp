@@ -73,6 +73,8 @@ const ID_KEYS = new Set([
   "endNodeId",
   "connectorId",
   "destinationId", // set_reactions: NODE-action target, nested in actions[]
+  "instanceNodeId", // get_instance_overrides: server renames tool's nodeId before send
+  "tableId", // edit_table
 ]);
 
 /**
