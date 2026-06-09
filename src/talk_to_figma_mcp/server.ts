@@ -1038,7 +1038,7 @@ server.prompt(
             text: `When working with Figma designs, follow these best practices:
 
 1. Start with Document Structure:
-   - First use get_document_info() to understand the current document
+   - First use glob_nodes({ type: ["SECTION","FRAME"] }) to map existing screens/sections before adding more
    - Plan your layout hierarchy before creating elements
    - Create a main container frame for each screen/section
 
@@ -1121,11 +1121,18 @@ server.prompt(
           role: "assistant",
           content: {
             type: "text",
-            text: `When reading Figma designs, follow these best practices:
+            text: `Exploring and modifying a Figma design works like editing a codebase: locate first with cheap searches, then read only what you need, then edit surgically. Do NOT dump whole subtrees to find something.
 
-1. Start with selection:
-   - First use read_node() (no nodeIds → current selection) to understand the current selection
-   - If no selection ask user to select single or multiple nodes
+## The ladder (cheap → detailed)
+1. Orient — glob_nodes({ root, type }) for a flat \`id:"name".TYPE @parent\` index of a page or subtree (the \`ls -R\`). Start here when you don't yet know the ids. Filter by \`type\` to cut noise (e.g. type:["SECTION","FRAME"] for the screen map).
+2. Locate — grep_nodes (regex over TEXT content, the \`grep\`) to find nodes by what they say, or query_nodes (predicates over node fields — fontSize<12, fills bound to a variable, etc.) to find by structure. All return short ids.
+3. Inspect — read_node({ nodeIds }) for the compact subtree of just the nodes you'll act on; raise \`depth\` or re-request a stub id to zoom; raw:true for every prop of one node.
+4. Modify — edit_nodes({ edits:[{nodeId, path, old?, new}] }) to write properties (text via the "characters" path). Pass \`old\` as a guard so you never overwrite a stale read.
+
+## Notes
+- No selection and no ids? read_node() with no args reads the current selection; if it's empty, ask the user to select, or glob_nodes the page.
+- Ids are short counters (n0, n1, ...) and flow between all tools — a glob/grep hit feeds straight into read_node/edit_nodes.
+- Width of search is cheap (ids only); depth of detail is not (full subtree). Prefer a wide glob then a narrow read over reading wide.
 `,
           },
         },
@@ -1146,121 +1153,30 @@ server.prompt(
           role: "assistant",
           content: {
             type: "text",
-            text: `# Intelligent Text Replacement Strategy
+            text: `# Text Replacement Strategy
 
-## 1. Analyze Design & Identify Structure
-- Index the text nodes to understand the overall structure of the design
-- Use AI pattern recognition to identify logical groupings:
-  * Tables (rows, columns, headers, cells)
-  * Lists (items, headers, nested lists)
-  * Card groups (similar cards with recurring text fields)
-  * Forms (labels, input fields, validation text)
-  * Navigation (menu items, breadcrumbs)
+## 1. Locate the text nodes
 \`\`\`
 glob_nodes({ root: "node-id", type: "TEXT" })   // flat index of every text node + its @parent
-read_node({ nodeIds: [...] })                    // pull full characters for the ones you'll edit
 grep_nodes({ root: "node-id", pattern: "..." })  // or find text nodes by content
+read_node({ nodeIds: [...] })                    // pull full characters for the ones you'll edit
 \`\`\`
 
-## 2. Strategic Chunking for Complex Designs
-- Divide replacement tasks into logical content chunks based on design structure
-- Use one of these chunking strategies that best fits the design:
-  * **Structural Chunking**: Table rows/columns, list sections, card groups
-  * **Spatial Chunking**: Top-to-bottom, left-to-right in screen areas
-  * **Semantic Chunking**: Content related to the same topic or functionality
-  * **Component-Based Chunking**: Process similar component instances together
-
-## 3. Progressive Replacement with Verification
-- Create a safe copy of the node for text replacement
-- Replace text chunk by chunk with continuous progress updates
-- After each chunk is processed:
-  * Export that section as a small, manageable image
-  * Verify text fits properly and maintain design integrity
-  * Fix issues before proceeding to the next chunk
-
+## 2. Replace in one call
+edit_nodes does the bulk replace — one edit per text node, the "characters" path loads the node's font for you. One call can span many nodes; large batches stream progress.
 \`\`\`
-// Clone the node to create a safe copy
-clone_node(nodeId: "selected-node-id", x: [new-x], y: [new-y])
-
-// Replace text chunk by chunk — one edit per text node, "characters" path loads the font
-edit_nodes({
-  edits: [
-    { nodeId: "node-id-1", path: "characters", new: "New text 1" },
-    // More nodes in this chunk...
-  ]
-})
-
-// Verify chunk with small, targeted image exports
-export_node_as_image(nodeId: "chunk-node-id", format: "PNG", scale: 0.5)
+edit_nodes({ edits: [
+  { nodeId: "n12", path: "characters", old: "Old", new: "New" },  // old = guard against a stale read
+  // ...more text nodes
+] })
 \`\`\`
 
-## 4. Intelligent Handling for Table Data
-- For tabular content:
-  * Process one row or column at a time
-  * Maintain alignment and spacing between cells
-  * Consider conditional formatting based on cell content
-  * Preserve header/data relationships
-
-## 5. Smart Text Adaptation
-- Adaptively handle text based on container constraints:
-  * Auto-detect space constraints and adjust text length
-  * Apply line breaks at appropriate linguistic points
-  * Maintain text hierarchy and emphasis
-  * Consider font scaling for critical content that must fit
-
-## 6. Progressive Feedback Loop
-- Establish a continuous feedback loop during replacement:
-  * Real-time progress updates (0-100%)
-  * Small image exports after each chunk for verification
-  * Issues identified early and resolved incrementally
-  * Quick adjustments applied to subsequent chunks
-
-## 7. Final Verification & Context-Aware QA
-- After all chunks are processed:
-  * Export the entire design at reduced scale for final verification
-  * Check for cross-chunk consistency issues
-  * Verify proper text flow between different sections
-  * Ensure design harmony across the full composition
-
-## 8. Chunk-Specific Export Scale Guidelines
-- Scale exports appropriately based on chunk size:
-  * Small chunks (1-5 elements): scale 1.0
-  * Medium chunks (6-20 elements): scale 0.7
-  * Large chunks (21-50 elements): scale 0.5
-  * Very large chunks (50+ elements): scale 0.3
-  * Full design verification: scale 0.2
-
-## Sample Chunking Strategy for Common Design Types
-
-### Tables
-- Process by logical rows (5-10 rows per chunk)
-- Alternative: Process by column for columnar analysis
-- Tip: Always include header row in first chunk for reference
-
-### Card Lists
-- Group 3-5 similar cards per chunk
-- Process entire cards to maintain internal consistency
-- Verify text-to-image ratio within cards after each chunk
-
-### Forms
-- Group related fields (e.g., "Personal Information", "Payment Details")
-- Process labels and input fields together
-- Ensure validation messages and hints are updated with their fields
-
-### Navigation & Menus
-- Process hierarchical levels together (main menu, submenu)
-- Respect information architecture relationships
-- Verify menu fit and alignment after replacement
-
-## Best Practices
-- **Preserve Design Intent**: Always prioritize design integrity
-- **Structural Consistency**: Maintain alignment, spacing, and hierarchy
-- **Visual Feedback**: Verify each chunk visually before proceeding
-- **Incremental Improvement**: Learn from each chunk to improve subsequent ones
-- **Balance Automation & Control**: Let AI handle repetitive replacements but maintain oversight
-- **Respect Content Relationships**: Keep related content consistent across chunks
-
-Remember that text is never just text—it's a core design element that must work harmoniously with the overall composition. This chunk-based strategy allows you to methodically transform text while maintaining design integrity.`,
+## 3. Chunk large jobs and verify visually
+For big designs, replace in logical chunks (a table's rows, a card group, one screen area) rather than all at once, and after each chunk export a small image to confirm text still fits and the layout holds before continuing:
+\`\`\`
+export_node_as_image({ nodeId: "chunk-node-id", format: "PNG", scale: 0.5 })  // smaller scale for bigger chunks
+\`\`\`
+Adapt text to its container: if it overflows, shorten or break lines at sensible points, and keep related content (labels with their fields, headers with their data) consistent across chunks.`,
           },
         },
       ],
