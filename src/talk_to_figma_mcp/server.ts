@@ -9,6 +9,7 @@ import { writeFile, readFile, mkdir } from "fs/promises";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { shapeNode } from "./shape.js";
+import { renumberIds, resolveShortIdsInParams } from "./idmap.js";
 
 // Define TypeScript interfaces for Figma responses
 interface FigmaResponse {
@@ -189,7 +190,7 @@ server.tool(
     try {
       const result = await sendCommandToFigma("get_selection");
       return {
-        content: [await jsonContent(result, { saveToFile, outputPath }, "selection")]
+        content: [await jsonContent(renumberIds(result), { saveToFile, outputPath }, "selection")]
       };
     } catch (error) {
       return {
@@ -249,7 +250,7 @@ server.tool(
       const opts: ShapeArgs = { depth, collapseIcons, collapseRepeats, cull };
       const result = await sendCommandToFigma("read_my_design", {});
       const shaped = Array.isArray(result)
-        ? result.map((r: any) => (r && r.document ? { ...r, document: shapeNode(r.document, opts) } : r))
+        ? result.map((r: any) => (r && r.document ? { ...r, document: renumberIds(shapeNode(r.document, opts)) } : r))
         : result;
       return {
         content: [await jsonContent(shaped, { saveToFile, outputPath }, "my-design")]
@@ -271,7 +272,7 @@ server.tool(
 // Node Info Tool
 server.tool(
   "get_node_info",
-  "Get information about a specific node in Figma, compacted for low token cost. Returns a fixed minimal field set per node (id, name, type, color/gradient, opacity, box or autoLayout, text); children expand to depth 6 by default — raise depth or re-request a stub's id to zoom in.",
+  "Get information about a specific node in Figma, compacted for low token cost. Returns a fixed minimal field set per node (id, name, type, color/gradient, opacity, box or autoLayout, text); children expand to depth 6 by default — raise depth or re-request a stub's id to zoom in. Node ids are short counters (n0, n1, ...) standing in for canonical Figma ids; pass them to any tool (read, edit, or get_node_info_raw).",
   {
     nodeId: z.string().describe("The ID of the node to get information about"),
     ...shapeParams,
@@ -280,7 +281,7 @@ server.tool(
   async ({ nodeId, depth, collapseIcons, collapseRepeats, cull, saveToFile, outputPath }: any) => {
     try {
       const result = await sendCommandToFigma("get_node_info", { nodeId });
-      const shaped = shapeNode(result, { depth, collapseIcons, collapseRepeats, cull });
+      const shaped = renumberIds(shapeNode(result, { depth, collapseIcons, collapseRepeats, cull }));
       return {
         content: [await jsonContent(shaped, { saveToFile, outputPath }, "node-info")]
       };
@@ -301,16 +302,20 @@ server.tool(
 // Raw Node Info Tool
 server.tool(
   "get_node_info_raw",
-  "Get the full, unfiltered JSON of a single node exactly as Figma serializes it (JSON_REST_V1), with all properties but with the children array stripped. Use when get_node_info's compacted view drops a property you need; large outputs auto-spill to a file.",
+  "Get the full, unfiltered JSON of a single node exactly as Figma serializes it (JSON_REST_V1), with all properties but with the children array stripped. Use when get_node_info's compacted view drops a property you need; large outputs auto-spill to a file. Accepts the short ids (n0, n1, ...) from compact output. Returns {requestedId, node}: requestedId echoes the id you passed, node carries the raw JSON with canonical Figma ids.",
   {
     nodeId: z.string().describe("The ID of the node to get the raw JSON for"),
     ...saveParams,
   },
   async ({ nodeId, saveToFile, outputPath }: any) => {
     try {
+      // sendCommandToFigma resolves a short id (n5) to the canonical id; the raw
+      // node keeps its real Figma ids untouched. Echo the requested id so the
+      // agent sees the short->canonical mapping instead of an unexplained swap.
       const result = await sendCommandToFigma("get_node_info_raw", { nodeId });
+      const wrapped = { requestedId: nodeId, node: result };
       return {
-        content: [await jsonContent(result, { saveToFile, outputPath }, "node-info-raw")]
+        content: [await jsonContent(wrapped, { saveToFile, outputPath }, "node-info-raw")]
       };
     } catch (error) {
       return {
@@ -447,7 +452,7 @@ server.tool(
           return { nodeId, info: result };
         })
       );
-      const shaped = results.map((result) => shapeNode(result.info, opts));
+      const shaped = renumberIds(results.map((result) => shapeNode(result.info, opts)));
       return {
         content: [await jsonContent(shaped, { saveToFile, outputPath }, "nodes-info")]
       };
@@ -3107,6 +3112,15 @@ function sendCommandToFigma(
     const requiresChannel = command !== "join";
     if (requiresChannel && !currentChannel) {
       reject(new Error("Must join a channel before sending commands"));
+      return;
+    }
+
+    // Translate short counter ids (n0, n1, ...) the agent saw in compact output
+    // back to canonical Figma ids before the command leaves the server.
+    try {
+      params = resolveShortIdsInParams(params);
+    } catch (err) {
+      reject(err instanceof Error ? err : new Error(String(err)));
       return;
     }
 

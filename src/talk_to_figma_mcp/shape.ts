@@ -11,7 +11,7 @@
 //                                 into the hex alpha; gradient = stop colors only)
 //   opacity                     — node layer opacity, only when != 1
 //   box [x,y,w,h]               — absolute extent, OR
-//   autoLayout {flow,gap,pad[],alignMain,alignCross,size}  — for auto-layout
+//   autoLayout {flow,alignMain,alignCross,size}  — for auto-layout
 //                                 containers (size = how it fits its own parent)
 //   size                        — fill/hug/px, for non-container children in a stack
 //   text                        — characters (no font styling)
@@ -247,26 +247,15 @@ function axisSize(node: any, parent: Stack, self: Stack, dim: "w" | "h", px: num
   return px;
 }
 
-/** Padding as [left, top, right, bottom]; undefined when all sides are zero. */
-function padArray(node: any): number[] | undefined {
-  const t = dim(node.paddingTop || 0);
-  const r = dim(node.paddingRight || 0);
-  const b = dim(node.paddingBottom || 0);
-  const l = dim(node.paddingLeft || 0);
-  if (!(t || r || b || l)) return undefined;
-  return [l, t, r, b];
-}
-
 /**
- * Auto-layout container spec: flow/gap/padding/align plus how the container
+ * Auto-layout container spec: flow/align plus how the container
  * itself sizes within its parent. Align values are canonical Figma enums
  * (MIN/CENTER/MAX/SPACE_BETWEEN/BASELINE) for round-trip into set_axis_align.
  */
 function autoLayoutOf(node: any, stack: "h" | "v", size: any): any {
   const al: any = { flow: stack };
-  if (node.itemSpacing) al.gap = dim(node.itemSpacing);
-  const pad = padArray(node);
-  if (pad) al.pad = pad;
+  // gap/padding intentionally omitted from the compact view — they are layout
+  // detail, not comprehension signal; fetch via get_node_info_raw when editing.
   // Plugin only forwards non-default (non-MIN) alignment, so presence => meaningful.
   if (node.primaryAxisAlignItems) al.alignMain = node.primaryAxisAlignItems;
   if (node.counterAxisAlignItems) al.alignCross = node.counterAxisAlignItems;
