@@ -871,6 +871,12 @@ async function setWriteProp(node, key, value) {
     await setSublayerTextProp(node.text, key, value);
     return;
   }
+  // INSTANCE variant/prop overrides go through setProperties, not assignment.
+  if (key === "componentProperties") {
+    if (!value || typeof value !== "object") throw new Error("componentProperties must be a {name: value} object");
+    applyComponentProperties(node, value);
+    return;
+  }
   if (key === "characters") {
     if (node.type !== "TEXT") throw new Error(`characters can only be set on TEXT nodes, not ${node.type}`);
     await setCharacters(node, String(value)); // loads the node's font (with fallback) itself
@@ -2487,6 +2493,70 @@ async function reparentNodes(params) {
   return { applied, total, results };
 }
 
+// An instance's componentProperties is a {key: {type, value, ...}} descriptor
+// map that's READ-ONLY — variant swaps and boolean/text/swap overrides land via
+// instance.setProperties({key: value}). The key is the bare group name for
+// VARIANT props but carries a "#nnn" suffix for BOOLEAN/TEXT/INSTANCE_SWAP (e.g.
+// "Has icon#7:0"); we resolve a caller's bare name onto whichever real key
+// matches so the agent can address it the way read_node shows the property name.
+
+/** Find the real componentProperties key for a caller-supplied name (exact, else pre-'#' segment). */
+function resolveComponentPropKey(defs, name) {
+  if (Object.prototype.hasOwnProperty.call(defs, name)) return name;
+  const base = String(name).split("#")[0];
+  for (const k in defs) {
+    if (k.split("#")[0] === base) return k;
+  }
+  return null;
+}
+
+/** Coerce an edit value to what setProperties expects for the prop's type (BOOLEAN takes a real bool). */
+function coerceComponentPropValue(def, value) {
+  if (def && def.type === "BOOLEAN" && typeof value === "string") return value === "true";
+  return value;
+}
+
+/**
+ * Apply a {name: value} map of component-property overrides to an INSTANCE via
+ * setProperties — the one path Figma allows for variant swaps and prop changes.
+ * INSTANCE_SWAP values must be a real component id/key string (the server does
+ * NOT remap a short id inside an edit value). Used by both edit_nodes (one prop)
+ * and write_nodes (a whole map on a freshly created instance).
+ */
+function applyComponentProperties(node, map) {
+  if (node.type !== "INSTANCE") {
+    throw new Error(`componentProperties can only be set on INSTANCE nodes, not ${node.type}`);
+  }
+  const defs = node.componentProperties || {};
+  const out = {};
+  for (const name in map) {
+    const realKey = resolveComponentPropKey(defs, name);
+    if (realKey == null) {
+      const avail = Object.keys(defs).join(", ") || "none";
+      throw new Error(`instance has no component property "${name}" (available: ${avail})`);
+    }
+    out[realKey] = coerceComponentPropValue(defs[realKey], map[name]);
+  }
+  node.setProperties(out);
+}
+
+/**
+ * Route an edit_nodes path of the form `componentProperties.<Name>` (optionally
+ * `.value`) to setProperties. Accepts both the bare-name and the `.value` forms
+ * so a path that mirrors a read (`componentProperties.Size.value`) works and its
+ * `old` guard compares against the bare value the agent saw.
+ */
+function setComponentProperty(node, steps, newValue, path) {
+  if (steps.length < 2 || steps[1].key == null) {
+    throw new Error(`path "${path}" must name a property, e.g. componentProperties.Size`);
+  }
+  const name = steps[1].key;
+  applyComponentProperties(node, { [name]: newValue });
+  const realKey = resolveComponentPropKey(node.componentProperties || {}, name);
+  const def = realKey != null ? node.componentProperties[realKey] : null;
+  return def ? normalizeForDisplay(def.value) : newValue;
+}
+
 /**
  * Write `newValue` at a parsed path on a node, returning the value read back.
  * Figma node properties are immutable references, so a nested write (e.g.
@@ -2498,6 +2568,13 @@ async function applyEditToNode(node, steps, newValue, oldLeaf, path) {
   const top = steps[0];
   if (top.index != null || top.wild) throw new Error(`path "${path}" must start with a property name`);
   const topKey = top.key;
+
+  // componentProperties is a read-only descriptor map; a variant/boolean/text/
+  // swap change goes through instance.setProperties(), not assignment. Route any
+  // edit whose top key is componentProperties there. (See setComponentProperty.)
+  if (topKey === "componentProperties") {
+    return setComponentProperty(node, steps, newValue, path);
+  }
 
   if (steps.length === 1) {
     if (topKey === "characters") {
