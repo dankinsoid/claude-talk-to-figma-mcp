@@ -145,6 +145,10 @@ The MCP server provides the following tools for interacting with Figma:
 - `grep_nodes` - Regex search over the text content of a subtree, line-oriented (the grep analog); reports matching lines as `id:"name".TEXT @parent L<n>: <line>`
 - `query_nodes` - Structural search by field predicates (`{path, op, value}`, AND-combined) — match on any node-model field (fontSize, fills color, bound variables, etc.), including key presence via `exists`/`absent`
 
+### Editing Nodes
+
+- `edit_nodes` - Generic, path-addressed property writer — the write-side twin of `query_nodes`/`get_node_info`, an `Edit`-style tool for the Figma node model instead of text. Pass `edits: [{nodeId, path, old?, new}]`: `path` uses the same syntax as `query_nodes` (dot for objects, `[i]` for an index; no `[*]`), `new` is the value to set (`#RRGGBB` → Figma rgb; whole objects/arrays allowed), and the optional `old` is an Edit-style guard that rejects only that edit on mismatch. Edits run in order, are independent (a failure surfaces its Figma error and the rest still apply), and one call can touch many nodes. Common paths: `name`, `characters` (loads the font), `x`/`y`, `width`/`height` (resize), `cornerRadius`, `fills[0].color`, `opacity`, `layoutMode`, `paddingTop`, `itemSpacing`, `primaryAxisAlignItems`, `layoutSizingHorizontal`. Replaces the former single-purpose setters (`move_node`, `resize_node`, `set_corner_radius`, `set_text_content`, `set_multiple_text_contents`, `set_layout_mode`, `set_padding`, `set_axis_align`, `set_layout_sizing`, `set_item_spacing`). Bulk text replace = one `{nodeId, path: "characters", new: "..."}` per node in a single call.
+
 ### Prototyping & Connections
 
 - `get_reactions` - Get all prototype reactions from nodes with visual highlight animation
@@ -157,29 +161,15 @@ The MCP server provides the following tools for interacting with Figma:
 - `create_frame` - Create a new frame with position, size, and optional name
 - `create_text` - Create a new text node with customizable font properties
 
-### Modifying text content
-
-- `set_text_content` - Set the text content of a single text node
-- `set_multiple_text_contents` - Batch update multiple text nodes efficiently
-
-### Auto Layout & Spacing
-
-- `set_layout_mode` - Set the layout mode and wrap behavior of a frame (NONE, HORIZONTAL, VERTICAL)
-- `set_padding` - Set padding values for an auto-layout frame (top, right, bottom, left)
-- `set_axis_align` - Set primary and counter axis alignment for auto-layout frames
-- `set_layout_sizing` - Set horizontal and vertical sizing modes for auto-layout frames (FIXED, HUG, FILL)
-- `set_item_spacing` - Set distance between children in an auto-layout frame
-
 ### Styling
 
-- `set_fill_color` - Set the fill color of a node (RGBA)
+- `set_fill_color` - Set the fill color of a node (RGBA); creates the fill if the node has none
 - `set_stroke_color` - Set the stroke color and weight of a node
-- `set_corner_radius` - Set the corner radius of a node with optional per-corner control
+
+> Other property edits (text, layout, geometry, corner radius, padding, spacing, position, size) go through `edit_nodes` — see [Editing Nodes](#editing-nodes).
 
 ### Layout & Organization
 
-- `move_node` - Move a node to a new position
-- `resize_node` - Resize a node with new dimensions
 - `delete_node` - Delete a node
 - `delete_multiple_nodes` - Delete multiple nodes at once efficiently
 - `clone_node` - Create a copy of an existing node with optional position offset
