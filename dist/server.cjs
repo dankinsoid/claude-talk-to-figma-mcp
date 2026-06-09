@@ -407,7 +407,13 @@ var Color = import_zod.z.union([
 var Paint = import_zod.z.object({
   type: import_zod.z.enum(["SOLID", "GRADIENT_LINEAR", "GRADIENT_RADIAL", "GRADIENT_ANGULAR", "GRADIENT_DIAMOND", "IMAGE"]).optional(),
   color: Color.optional().describe("SOLID paint color, #RRGGBB"),
-  opacity: import_zod.z.number().min(0).max(1).optional()
+  opacity: import_zod.z.number().min(0).max(1).optional(),
+  // IMAGE paint: pass a URL and the server fetches the bytes and imports them
+  // into Figma for you (no imageHash juggling). type defaults to "IMAGE" when
+  // imageUrl is present. Alternatively pass an imageHash you already have.
+  imageUrl: import_zod.z.string().url().optional().describe('image fill source URL \u2014 fetched server-side and imported; implies type "IMAGE"'),
+  imageHash: import_zod.z.string().optional().describe("pre-imported Figma image hash (alternative to imageUrl)"),
+  scaleMode: import_zod.z.enum(["FILL", "FIT", "CROP", "TILE"]).optional().describe("IMAGE paint scale mode (default FILL)")
 }).passthrough();
 var FontName = import_zod.z.object({ family: import_zod.z.string(), style: import_zod.z.string().describe('face name, e.g. "Regular", "Bold Italic"') }).describe("font; loaded automatically before write");
 var LetterSpacing = import_zod.z.union([
@@ -1015,7 +1021,8 @@ var NODE_TYPES = [
   "COMPONENT",
   "SECTION",
   "SLICE",
-  "INSTANCE"
+  "INSTANCE",
+  "SVG"
 ];
 var NOTES = {
   x: "parent-relative x (ignored inside an auto-layout parent)",
@@ -1039,8 +1046,10 @@ var width = import_zod3.z.number().positive().optional().describe("routed throug
 var height = import_zod3.z.number().positive().optional().describe("routed through resize()");
 var componentId = import_zod3.z.string().optional().describe("local COMPONENT id (from get_local_components)");
 var componentKey = import_zod3.z.string().optional().describe("published library component key");
+var svg = import_zod3.z.string().optional().describe("raw SVG markup to import as a vector node");
+var svgUrl = import_zod3.z.string().url().optional().describe("URL of an SVG \u2014 fetched server-side, then imported");
 var children = import_zod3.z.array(import_zod3.z.lazy(() => writeNodeUnion)).optional().describe("nested specs, created recursively inside this node");
-var CONTAINER_TYPES = /* @__PURE__ */ new Set(["FRAME", "COMPONENT", "SECTION", "INSTANCE"]);
+var CONTAINER_TYPES = /* @__PURE__ */ new Set(["FRAME", "COMPONENT", "SECTION", "INSTANCE", "SVG"]);
 var REQUIRED = { TEXT: /* @__PURE__ */ new Set(["characters"]) };
 var FIELD_OVERRIDES = {
   opacity: import_zod3.z.number().min(0).max(1),
@@ -1075,6 +1084,10 @@ function compose(type) {
     shape.componentId = componentId;
     shape.componentKey = componentKey;
   }
+  if (type === "SVG") {
+    shape.svg = svg;
+    shape.svgUrl = svgUrl;
+  }
   return import_zod3.z.object(shape).passthrough();
 }
 var NODE_SCHEMAS = Object.fromEntries(
@@ -1092,6 +1105,9 @@ var writeNodeUnion = import_zod3.z.lazy(
     rejectReadOnly(spec, ctx);
     if (spec.type === "INSTANCE" && !spec.componentId && !spec.componentKey) {
       ctx.addIssue({ code: import_zod3.z.ZodIssueCode.custom, message: "INSTANCE needs componentId (local) or componentKey (published)", path: ["componentId"] });
+    }
+    if (spec.type === "SVG" && !spec.svg && !spec.svgUrl) {
+      ctx.addIssue({ code: import_zod3.z.ZodIssueCode.custom, message: "SVG needs `svg` markup or `svgUrl`", path: ["svg"] });
     }
   })
 );
@@ -1228,6 +1244,50 @@ var saveParams = {
 };
 var outputFileSeq = 0;
 var INLINE_MAX_BYTES = 1024 * 1024;
+var IMPORT_MAX_BYTES = 10 * 1024 * 1024;
+async function resolveExternalAssets(value) {
+  if (Array.isArray(value)) {
+    await Promise.all(value.map((v) => resolveExternalAssets(v)));
+    return value;
+  }
+  if (!value || typeof value !== "object") return value;
+  if (typeof value.imageUrl === "string") {
+    const url = value.imageUrl;
+    delete value.imageUrl;
+    try {
+      value.imageBytes = await fetchAssetBase64(url);
+      if (value.type == null) value.type = "IMAGE";
+    } catch (err) {
+      value.imageError = err instanceof Error ? err.message : String(err);
+    }
+  }
+  if (typeof value.svgUrl === "string" && typeof value.svg !== "string") {
+    const url = value.svgUrl;
+    delete value.svgUrl;
+    try {
+      value.svg = await fetchAssetText(url);
+    } catch (err) {
+      value.svgError = err instanceof Error ? err.message : String(err);
+    }
+  }
+  await Promise.all(Object.keys(value).map((k) => resolveExternalAssets(value[k])));
+  return value;
+}
+async function fetchAssetBytes(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`fetch ${url} \u2192 HTTP ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.byteLength > IMPORT_MAX_BYTES) {
+    throw new Error(`asset ${url} is ${(buf.byteLength / 1024 / 1024).toFixed(1)}MB, over the ${IMPORT_MAX_BYTES / 1024 / 1024}MB import cap`);
+  }
+  return buf;
+}
+async function fetchAssetBase64(url) {
+  return (await fetchAssetBytes(url)).toString("base64");
+}
+async function fetchAssetText(url) {
+  return (await fetchAssetBytes(url)).toString("utf8");
+}
 async function writeOutputFile(baseName, ext, data, outputPath) {
   const safeBase = baseName.replace(/[^a-zA-Z0-9_-]/g, "-");
   const target = outputPath ? outputPath : (0, import_path.join)((0, import_os.tmpdir)(), "talk-to-figma", `${safeBase}-${Date.now()}-${outputFileSeq++}.${ext}`);
@@ -1561,6 +1621,7 @@ server.tool(
         if (msg) rejected.push(`\u2717 ${e.nodeId} ${e.path}: ${msg}`);
         else valid.push(e);
       }
+      await resolveExternalAssets(valid.map((e) => e.new));
       const result = valid.length ? await sendCommandToFigma("edit_nodes", { edits: valid }) : { applied: 0, total: 0, results: [] };
       const fmt = (v) => v === null || v === void 0 ? "(absent)" : typeof v === "object" ? JSON.stringify(v) : String(v);
       const rows = [
@@ -1586,7 +1647,7 @@ server.tool(
 );
 server.tool(
   "write_nodes",
-  'Create new nodes from raw Figma JSON \u2014 the create-side twin of edit_nodes, a Write tool for the node tree instead of text. Pass `nodes`: an array of node specs. Each spec is `{type, ...props, children?}`: `type` is the Figma node type to create (RECTANGLE, FRAME, TEXT, ELLIPSE, LINE, STAR, POLYGON, VECTOR, COMPONENT, SECTION, SLICE, or INSTANCE). Every OTHER key is a property written onto the new node exactly as edit_nodes writes a path \u2014 `name`, `x`, `y`, `cornerRadius`, `opacity`, `fills`, `layoutMode`, `paddingTop`, `itemSpacing`, etc. Values follow edit_nodes rules: any `color` field given as `#RRGGBB` is converted to Figma\'s rgb 0-1 (so `fills:[{type:"SOLID",color:"#3366ff"}]` works), `width`/`height` route through resize(), and on a TEXT node `characters` loads the node\'s font for you. Placement: `parentId` appends the node into an existing container (short ids n0,... or full Figma ids; default is the current page) and `index` sets its position among siblings. `children` is an array of the same spec shape, created recursively inside this node \u2014 this is how you write a whole subtree (frame \u2192 its rows \u2192 their text) in one call. Specs are INDEPENDENT like edit_nodes: a spec whose factory or parent lookup fails records its Figma error and the siblings still create; within a created node, a single bad property (e.g. padding with no layoutMode, a value Figma rejects) is reported per-property and the node still survives with its other props. INSTANCE needs `componentId` (a local COMPONENT, from get_local_components) or `componentKey` (a published library component). The result is a tree of `\u2713 <id> <TYPE> "<name>"` (use that id as a parentId or in edit_nodes next) or `\u2717 <error>`, with `! key: <error>` lines for any rejected properties. Large batches stream progress so a long run won\'t time out.',
+  'Create new nodes from raw Figma JSON \u2014 the create-side twin of edit_nodes, a Write tool for the node tree instead of text. Pass `nodes`: an array of node specs. Each spec is `{type, ...props, children?}`: `type` is the Figma node type to create (RECTANGLE, FRAME, TEXT, ELLIPSE, LINE, STAR, POLYGON, VECTOR, COMPONENT, SECTION, SLICE, or INSTANCE). Every OTHER key is a property written onto the new node exactly as edit_nodes writes a path \u2014 `name`, `x`, `y`, `cornerRadius`, `opacity`, `fills`, `layoutMode`, `paddingTop`, `itemSpacing`, etc. Values follow edit_nodes rules: any `color` field given as `#RRGGBB` is converted to Figma\'s rgb 0-1 (so `fills:[{type:"SOLID",color:"#3366ff"}]` works), `width`/`height` route through resize(), and on a TEXT node `characters` loads the node\'s font for you. Placement: `parentId` appends the node into an existing container (short ids n0,... or full Figma ids; default is the current page) and `index` sets its position among siblings. `children` is an array of the same spec shape, created recursively inside this node \u2014 this is how you write a whole subtree (frame \u2192 its rows \u2192 their text) in one call. Specs are INDEPENDENT like edit_nodes: a spec whose factory or parent lookup fails records its Figma error and the siblings still create; within a created node, a single bad property (e.g. padding with no layoutMode, a value Figma rejects) is reported per-property and the node still survives with its other props. INSTANCE needs `componentId` (a local COMPONENT, from get_local_components) or `componentKey` (a published library component). IMAGE fills: put `{type:"IMAGE", imageUrl:"https://\u2026", scaleMode:"FILL"}` in `fills` \u2014 the server fetches the URL and imports the bytes into Figma for you (no imageHash needed); same works in edit_nodes when you set a node\'s `fills`. SVG: `type:"SVG"` with `svg:"<svg\u2026>"` raw markup or `svgUrl:"https://\u2026"` (fetched server-side) creates a vector node from the SVG. The result is a tree of `\u2713 <id> <TYPE> "<name>"` (use that id as a parentId or in edit_nodes next) or `\u2717 <error>`, with `! key: <error>` lines for any rejected properties. Large batches stream progress so a long run won\'t time out.',
   {
     nodes: import_zod4.z.array(import_zod4.z.record(import_zod4.z.any())).min(1).describe("Node specs, each `{type, ...props, children?}`. Created in order, independent \u2014 one failing does not abort the rest.")
   },
@@ -1605,6 +1666,7 @@ server.tool(
           }
         }
       }
+      await resolveExternalAssets(valid);
       const result = valid.length ? await sendCommandToFigma("write_nodes", { nodes: valid }) : { created: 0, total: 0, results: [] };
       const renumber = (id) => renumberIds({ id }).id;
       const lines = [...rejected];

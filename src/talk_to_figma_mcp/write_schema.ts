@@ -28,7 +28,7 @@ import { Color, Paint } from "./shared-schemas.js";
 /** Node types write_nodes can create — mirrors NODE_FACTORIES + INSTANCE in code.js. */
 export const NODE_TYPES = [
   "FRAME", "TEXT", "RECTANGLE", "ELLIPSE", "LINE", "STAR", "POLYGON",
-  "VECTOR", "COMPONENT", "SECTION", "SLICE", "INSTANCE",
+  "VECTOR", "COMPONENT", "SECTION", "SLICE", "INSTANCE", "SVG",
 ] as const;
 export type NodeType = (typeof NODE_TYPES)[number];
 
@@ -57,10 +57,14 @@ const width = z.number().positive().optional().describe("routed through resize()
 const height = z.number().positive().optional().describe("routed through resize()");
 const componentId = z.string().optional().describe("local COMPONENT id (from get_local_components)");
 const componentKey = z.string().optional().describe("published library component key");
+// SVG node (figma.createNodeFromSvg → a FRAME of vectors). Give the raw markup
+// in `svg`, OR `svgUrl` which the server fetches for you.
+const svg = z.string().optional().describe("raw SVG markup to import as a vector node");
+const svgUrl = z.string().url().optional().describe("URL of an SVG — fetched server-side, then imported");
 // `children` is the same union, lazily referenced so the recursive type resolves.
 const children = z.array(z.lazy((): z.ZodTypeAny => writeNodeUnion)).optional().describe("nested specs, created recursively inside this node");
 
-const CONTAINER_TYPES = new Set<NodeType>(["FRAME", "COMPONENT", "SECTION", "INSTANCE"]);
+const CONTAINER_TYPES = new Set<NodeType>(["FRAME", "COMPONENT", "SECTION", "INSTANCE", "SVG"]);
 const REQUIRED: Partial<Record<NodeType, Set<string>>> = { TEXT: new Set(["characters"]) };
 
 // Range constraints Figma enforces at runtime but doesn't encode in its types
@@ -103,6 +107,10 @@ function compose(type: NodeType): z.ZodTypeAny {
     shape.componentId = componentId;
     shape.componentKey = componentKey;
   }
+  if (type === "SVG") {
+    shape.svg = svg;
+    shape.svgUrl = svgUrl;
+  }
   return z.object(shape).passthrough();
 }
 
@@ -126,6 +134,9 @@ export const writeNodeUnion: z.ZodTypeAny = z.lazy(() =>
     rejectReadOnly(spec, ctx);
     if (spec.type === "INSTANCE" && !spec.componentId && !spec.componentKey) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "INSTANCE needs componentId (local) or componentKey (published)", path: ["componentId"] });
+    }
+    if (spec.type === "SVG" && !spec.svg && !spec.svgUrl) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "SVG needs `svg` markup or `svgUrl`", path: ["svg"] });
     }
   })
 );

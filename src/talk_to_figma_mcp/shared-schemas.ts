@@ -19,6 +19,19 @@ export const Paint = z
       .optional(),
     color: Color.optional().describe("SOLID paint color, #RRGGBB"),
     opacity: z.number().min(0).max(1).optional(),
+    // IMAGE paint: pass a URL and the server fetches the bytes and imports them
+    // into Figma for you (no imageHash juggling). type defaults to "IMAGE" when
+    // imageUrl is present. Alternatively pass an imageHash you already have.
+    imageUrl: z
+      .string()
+      .url()
+      .optional()
+      .describe('image fill source URL — fetched server-side and imported; implies type "IMAGE"'),
+    imageHash: z.string().optional().describe("pre-imported Figma image hash (alternative to imageUrl)"),
+    scaleMode: z
+      .enum(["FILL", "FIT", "CROP", "TILE"])
+      .optional()
+      .describe("IMAGE paint scale mode (default FILL)"),
   })
   .passthrough();
 

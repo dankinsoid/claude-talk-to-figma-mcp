@@ -693,7 +693,7 @@ const NODE_FACTORIES = {
 };
 
 // Keys consumed by the spec itself rather than written onto the node.
-const WRITE_RESERVED = new Set(["type", "parentId", "index", "children", "id", "componentId", "componentKey"]);
+const WRITE_RESERVED = new Set(["type", "parentId", "index", "children", "id", "componentId", "componentKey", "svg", "svgUrl", "svgError"]);
 
 // Apply structural props before cosmetic ones: a font must load before its
 // glyphs, layoutMode must exist before padding/spacing it gates, and characters
@@ -710,10 +710,14 @@ function writePropWeight(k) {
 }
 
 // Recurse hex `color` leaves into Figma rgb 0-1, mirroring edit_nodes' convertWriteValue
-// but reaching colors nested inside paint arrays (fills/strokes).
+// but reaching colors nested inside paint arrays (fills/strokes). Also resolves
+// image paints: the server replaces a paint's imageUrl with base64 imageBytes,
+// which we import here into a real Figma image + imageHash.
 function coerceColors(val) {
   if (Array.isArray(val)) return val.map(coerceColors);
   if (val && typeof val === "object") {
+    if (typeof val.imageError === "string") throw new Error(`image fill: ${val.imageError}`);
+    if (typeof val.imageBytes === "string") return makeImagePaint(val);
     const out = {};
     for (const k in val) {
       if (k === "color" && typeof val[k] === "string" && /^#[0-9a-fA-F]{3,8}$/.test(val[k])) {
@@ -773,6 +777,10 @@ async function createOneNode(spec, fallbackParent, counts, progress) {
     if (!type) throw new Error("node spec needs a `type`");
     if (type === "INSTANCE") {
       node = await instantiateComponent(spec);
+    } else if (type === "SVG") {
+      if (typeof spec.svgError === "string") throw new Error(`svg import: ${spec.svgError}`);
+      if (typeof spec.svg !== "string" || !spec.svg) throw new Error("SVG needs `svg` markup or `svgUrl`");
+      node = figma.createNodeFromSvg(spec.svg);
     } else {
       const make = NODE_FACTORIES[type];
       if (!make) throw new Error(`unsupported node type "${type}"`);
@@ -1016,6 +1024,46 @@ async function exportNodeAsImage(params) {
     throw new Error(`Error exporting node as image: ${error.message}`);
   }
 }
+// Decode a base64 string into a Uint8Array. No atob in the plugin sandbox, so
+// decode by hand (inverse of customBase64Encode).
+function customBase64Decode(base64) {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const lookup = new Uint8Array(256);
+  for (let i = 0; i < chars.length; i++) lookup[chars.charCodeAt(i)] = i;
+
+  let len = base64.length;
+  while (len > 0 && base64[len - 1] === "=") len--; // ignore padding
+  const byteLength = (len * 3) >> 2;
+  const bytes = new Uint8Array(byteLength);
+
+  let p = 0;
+  for (let i = 0; i < len; i += 4) {
+    const a = lookup[base64.charCodeAt(i)];
+    const b = lookup[base64.charCodeAt(i + 1)];
+    const c = lookup[base64.charCodeAt(i + 2)];
+    const d = lookup[base64.charCodeAt(i + 3)];
+    if (p < byteLength) bytes[p++] = (a << 2) | (b >> 4);
+    if (p < byteLength) bytes[p++] = ((b & 15) << 4) | (c >> 2);
+    if (p < byteLength) bytes[p++] = ((c & 3) << 6) | d;
+  }
+  return bytes;
+}
+
+// Build an IMAGE paint from a server-resolved paint carrying base64 imageBytes:
+// import the bytes into Figma (sync) and swap in the resulting imageHash.
+function makeImagePaint(paint) {
+  const image = figma.createImage(customBase64Decode(paint.imageBytes));
+  const out = {};
+  for (const k in paint) {
+    if (k === "imageBytes" || k === "imageUrl" || k === "imageError") continue;
+    out[k] = paint[k];
+  }
+  out.type = "IMAGE";
+  out.imageHash = image.hash;
+  if (!out.scaleMode) out.scaleMode = "FILL";
+  return out;
+}
+
 function customBase64Encode(bytes) {
   const chars =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -2148,6 +2196,10 @@ function convertWriteValue(newValue, oldLeaf, key) {
       return rgb;
     }
   }
+  // A whole object/array value (e.g. setting `fills` to a paint array) gets the
+  // same recursive treatment write_nodes uses: nested hex colors → rgb 0-1 and
+  // server-resolved image paints (imageBytes) → an imported imageHash.
+  if (newValue && typeof newValue === "object") return coerceColors(newValue);
   return newValue;
 }
 

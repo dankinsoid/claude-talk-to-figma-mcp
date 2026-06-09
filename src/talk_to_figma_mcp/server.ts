@@ -117,6 +117,70 @@ let outputFileSeq = 0;
 // file — base64 in the context is ~1.3x this and very expensive.
 const INLINE_MAX_BYTES = 1024 * 1024;
 
+// Cap on a single asset (image/SVG) imported via a URL in a write/edit payload.
+// The bytes ride the local WebSocket to the plugin base64-encoded, so a runaway
+// URL would bloat the message; reject loudly instead.
+const IMPORT_MAX_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Walk a write/edit payload and resolve external asset URLs into inline data the
+ * plugin can build without network access (its manifest only allows the relay):
+ *   • a paint `{imageUrl}`  → fetch bytes → `{imageBytes: <base64>}` (plugin
+ *     calls figma.createImage and fills in the imageHash)
+ *   • an SVG spec `{svgUrl}` → fetch text → `{svg: "<svg…>"}`
+ * Mutates in place. A fetch failure is recorded as `imageError`/`svgError` on the
+ * same object so the plugin can surface it as a per-node/per-edit error instead
+ * of failing the whole batch. Returns the same value for convenience.
+ */
+async function resolveExternalAssets(value: any): Promise<any> {
+  if (Array.isArray(value)) {
+    await Promise.all(value.map((v) => resolveExternalAssets(v)));
+    return value;
+  }
+  if (!value || typeof value !== "object") return value;
+
+  if (typeof value.imageUrl === "string") {
+    const url = value.imageUrl;
+    delete value.imageUrl;
+    try {
+      value.imageBytes = await fetchAssetBase64(url);
+      if (value.type == null) value.type = "IMAGE";
+    } catch (err) {
+      value.imageError = err instanceof Error ? err.message : String(err);
+    }
+  }
+  if (typeof value.svgUrl === "string" && typeof value.svg !== "string") {
+    const url = value.svgUrl;
+    delete value.svgUrl;
+    try {
+      value.svg = await fetchAssetText(url);
+    } catch (err) {
+      value.svgError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  await Promise.all(Object.keys(value).map((k) => resolveExternalAssets(value[k])));
+  return value;
+}
+
+async function fetchAssetBytes(url: string): Promise<Buffer> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`fetch ${url} → HTTP ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.byteLength > IMPORT_MAX_BYTES) {
+    throw new Error(`asset ${url} is ${(buf.byteLength / 1024 / 1024).toFixed(1)}MB, over the ${IMPORT_MAX_BYTES / 1024 / 1024}MB import cap`);
+  }
+  return buf;
+}
+
+async function fetchAssetBase64(url: string): Promise<string> {
+  return (await fetchAssetBytes(url)).toString("base64");
+}
+
+async function fetchAssetText(url: string): Promise<string> {
+  return (await fetchAssetBytes(url)).toString("utf8");
+}
+
 async function writeOutputFile(
   baseName: string,
   ext: string,
@@ -633,6 +697,10 @@ server.tool(
         else valid.push(e);
       }
 
+      // Resolve any imageUrl in an edit's value (e.g. setting fills to an image
+      // paint) into inline bytes the plugin imports without network access.
+      await resolveExternalAssets(valid.map((e) => e.new));
+
       const result: any = valid.length ? await sendCommandToFigma("edit_nodes", { edits: valid }) : { applied: 0, total: 0, results: [] };
       const fmt = (v: any) =>
         v === null || v === undefined
@@ -669,7 +737,7 @@ server.tool(
 // @ai-generated(solo)
 server.tool(
   "write_nodes",
-  "Create new nodes from raw Figma JSON — the create-side twin of edit_nodes, a Write tool for the node tree instead of text. Pass `nodes`: an array of node specs. Each spec is `{type, ...props, children?}`: `type` is the Figma node type to create (RECTANGLE, FRAME, TEXT, ELLIPSE, LINE, STAR, POLYGON, VECTOR, COMPONENT, SECTION, SLICE, or INSTANCE). Every OTHER key is a property written onto the new node exactly as edit_nodes writes a path — `name`, `x`, `y`, `cornerRadius`, `opacity`, `fills`, `layoutMode`, `paddingTop`, `itemSpacing`, etc. Values follow edit_nodes rules: any `color` field given as `#RRGGBB` is converted to Figma's rgb 0-1 (so `fills:[{type:\"SOLID\",color:\"#3366ff\"}]` works), `width`/`height` route through resize(), and on a TEXT node `characters` loads the node's font for you. Placement: `parentId` appends the node into an existing container (short ids n0,... or full Figma ids; default is the current page) and `index` sets its position among siblings. `children` is an array of the same spec shape, created recursively inside this node — this is how you write a whole subtree (frame → its rows → their text) in one call. Specs are INDEPENDENT like edit_nodes: a spec whose factory or parent lookup fails records its Figma error and the siblings still create; within a created node, a single bad property (e.g. padding with no layoutMode, a value Figma rejects) is reported per-property and the node still survives with its other props. INSTANCE needs `componentId` (a local COMPONENT, from get_local_components) or `componentKey` (a published library component). The result is a tree of `✓ <id> <TYPE> \"<name>\"` (use that id as a parentId or in edit_nodes next) or `✗ <error>`, with `! key: <error>` lines for any rejected properties. Large batches stream progress so a long run won't time out.",
+  "Create new nodes from raw Figma JSON — the create-side twin of edit_nodes, a Write tool for the node tree instead of text. Pass `nodes`: an array of node specs. Each spec is `{type, ...props, children?}`: `type` is the Figma node type to create (RECTANGLE, FRAME, TEXT, ELLIPSE, LINE, STAR, POLYGON, VECTOR, COMPONENT, SECTION, SLICE, or INSTANCE). Every OTHER key is a property written onto the new node exactly as edit_nodes writes a path — `name`, `x`, `y`, `cornerRadius`, `opacity`, `fills`, `layoutMode`, `paddingTop`, `itemSpacing`, etc. Values follow edit_nodes rules: any `color` field given as `#RRGGBB` is converted to Figma's rgb 0-1 (so `fills:[{type:\"SOLID\",color:\"#3366ff\"}]` works), `width`/`height` route through resize(), and on a TEXT node `characters` loads the node's font for you. Placement: `parentId` appends the node into an existing container (short ids n0,... or full Figma ids; default is the current page) and `index` sets its position among siblings. `children` is an array of the same spec shape, created recursively inside this node — this is how you write a whole subtree (frame → its rows → their text) in one call. Specs are INDEPENDENT like edit_nodes: a spec whose factory or parent lookup fails records its Figma error and the siblings still create; within a created node, a single bad property (e.g. padding with no layoutMode, a value Figma rejects) is reported per-property and the node still survives with its other props. INSTANCE needs `componentId` (a local COMPONENT, from get_local_components) or `componentKey` (a published library component). IMAGE fills: put `{type:\"IMAGE\", imageUrl:\"https://…\", scaleMode:\"FILL\"}` in `fills` — the server fetches the URL and imports the bytes into Figma for you (no imageHash needed); same works in edit_nodes when you set a node's `fills`. SVG: `type:\"SVG\"` with `svg:\"<svg…>\"` raw markup or `svgUrl:\"https://…\"` (fetched server-side) creates a vector node from the SVG. The result is a tree of `✓ <id> <TYPE> \"<name>\"` (use that id as a parentId or in edit_nodes next) or `✗ <error>`, with `! key: <error>` lines for any rejected properties. Large batches stream progress so a long run won't time out.",
   {
     nodes: z
       .array(z.record(z.any()))
@@ -695,6 +763,10 @@ server.tool(
           }
         }
       }
+
+      // Resolve any imageUrl/svgUrl in the validated specs into inline bytes/markup
+      // the plugin can build offline (fetched here so the plugin needs no network).
+      await resolveExternalAssets(valid);
 
       const result: any = valid.length ? await sendCommandToFigma("write_nodes", { nodes: valid }) : { created: 0, total: 0, results: [] };
       const renumber = (id: string) => renumberIds({ id }).id;
