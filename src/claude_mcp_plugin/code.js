@@ -4117,7 +4117,7 @@ async function setVariables(params) {
   const varByKey = {};
   const varByName = {};
   for (const v of existingVars) {
-    varByKey[v.variableCollectionId + " " + v.name] = v;
+    varByKey[v.variableCollectionId + "\u0000" + v.name] = v;
     varByName[v.name] = v;
   }
 
@@ -4178,7 +4178,7 @@ async function setVariables(params) {
           (await figma.variables.getVariableByIdAsync(vi.id));
         if (!variable) throw new Error("Variable not found: " + vi.id);
       } else {
-        variable = varByKey[collection.id + " " + vi.name] || null;
+        variable = varByKey[collection.id + "\u0000" + vi.name] || null;
       }
 
       if (!variable) {
@@ -4188,7 +4188,7 @@ async function setVariables(params) {
         variable = figma.variables.createVariable(vi.name, collection, vi.type);
         result.variablesCreated++;
         existingVars.push(variable);
-        varByKey[collection.id + " " + variable.name] = variable;
+        varByKey[collection.id + "\u0000" + variable.name] = variable;
         varByName[variable.name] = variable;
       } else {
         result.variablesUpdated++;
@@ -4228,7 +4228,7 @@ async function setVariables(params) {
     let target = null;
     if (refId) target = await figma.variables.getVariableByIdAsync(refId);
     if (!target && refName) {
-      target = varByKey[pa.collectionId + " " + refName] || varByName[refName] || null;
+      target = varByKey[pa.collectionId + "\u0000" + refName] || varByName[refName] || null;
     }
     if (!target) throw new Error("Alias target not found: " + (refName || refId));
     pa.variable.setValueForMode(pa.modeId, figma.variables.createVariableAlias(target));
