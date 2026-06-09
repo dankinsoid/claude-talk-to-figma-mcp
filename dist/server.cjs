@@ -1682,56 +1682,6 @@ server.tool(
     }
   }
 );
-server.tool(
-  "scan_nodes_by_types",
-  "Scan for child nodes with specific types in the selected Figma node",
-  {
-    nodeId: import_zod.z.string().describe("ID of the node to scan"),
-    types: import_zod.z.array(import_zod.z.string()).describe("Array of node types to find in the child nodes (e.g. ['COMPONENT', 'FRAME'])"),
-    ...saveParams
-  },
-  async ({ nodeId, types, saveToFile, outputPath }) => {
-    try {
-      const initialStatus = {
-        type: "text",
-        text: `Starting node type scanning for types: ${types.join(", ")}...`
-      };
-      const result = await sendCommandToFigma("scan_nodes_by_types", {
-        nodeId,
-        types
-      });
-      if (result && typeof result === "object" && "matchingNodes" in result) {
-        const typedResult = result;
-        const summaryText = `Scan completed: Found ${typedResult.count} nodes matching types: ${typedResult.searchedTypes.join(", ")}`;
-        return {
-          content: [
-            initialStatus,
-            {
-              type: "text",
-              text: summaryText
-            },
-            await jsonContent(typedResult.matchingNodes, { saveToFile, outputPath }, "matching-nodes")
-          ]
-        };
-      }
-      return {
-        content: [
-          initialStatus,
-          await jsonContent(result, { saveToFile, outputPath }, "matching-nodes")
-        ]
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error scanning nodes by types: ${error instanceof Error ? error.message : String(error)}`
-          }
-        ]
-      };
-    }
-  }
-);
 server.prompt(
   "text_replacement_strategy",
   "Systematic approach for replacing text in Figma designs",
@@ -2006,10 +1956,10 @@ const textNodes = await scan_text_nodes({
 Get all potential target elements that annotations might refer to:
 
 \`\`\`typescript
-// Scan for all UI elements that could be annotation targets
-const targetNodes = await scan_nodes_by_types({
-  nodeId: selectedNodeId,
-  types: [
+// List all UI elements that could be annotation targets
+const targetNodes = await glob_nodes({
+  root: selectedNodeId,
+  type: [
     "COMPONENT",
     "INSTANCE",
     "FRAME"
@@ -2112,7 +2062,7 @@ This strategy enables transferring content and property overrides from a source 
 
 ### 1. Selection Analysis
 - Use \`get_selection()\` to identify the parent component or selected instances
-- For parent components, scan for instances with \`scan_nodes_by_types({ nodeId: "parent-id", types: ["INSTANCE"] })\`
+- For parent components, list instances with \`glob_nodes({ root: "parent-id", type: "INSTANCE" })\`
 - Identify custom slots by name patterns (e.g. "Custom Slot*" or "Instance Slot") or by examining text content
 - Determine which is the source instance (with content to copy) and which are targets (where to apply content)
 

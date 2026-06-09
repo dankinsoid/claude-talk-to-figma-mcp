@@ -1744,83 +1744,6 @@ server.tool(
   }
 );
 
-// Node Type Scanning Tool
-server.tool(
-  "scan_nodes_by_types",
-  "Scan for child nodes with specific types in the selected Figma node",
-  {
-    nodeId: z.string().describe("ID of the node to scan"),
-    types: z.array(z.string()).describe("Array of node types to find in the child nodes (e.g. ['COMPONENT', 'FRAME'])"),
-    ...saveParams,
-  },
-  async ({ nodeId, types, saveToFile, outputPath }: any) => {
-    try {
-      // Initial response to indicate we're starting the process
-      const initialStatus = {
-        type: "text" as const,
-        text: `Starting node type scanning for types: ${types.join(', ')}...`,
-      };
-
-      // Use the plugin's scan_nodes_by_types function
-      const result = await sendCommandToFigma("scan_nodes_by_types", {
-        nodeId,
-        types
-      });
-
-      // Format the response
-      if (result && typeof result === 'object' && 'matchingNodes' in result) {
-        const typedResult = result as {
-          success: boolean,
-          count: number,
-          matchingNodes: Array<{
-            id: string,
-            name: string,
-            type: string,
-            bbox: {
-              x: number,
-              y: number,
-              width: number,
-              height: number
-            }
-          }>,
-          searchedTypes: Array<string>
-        };
-
-        const summaryText = `Scan completed: Found ${typedResult.count} nodes matching types: ${typedResult.searchedTypes.join(', ')}`;
-
-        return {
-          content: [
-            initialStatus,
-            {
-              type: "text" as const,
-              text: summaryText
-            },
-            await jsonContent(typedResult.matchingNodes, { saveToFile, outputPath }, "matching-nodes")
-          ],
-        };
-      }
-
-      // If the result is in an unexpected format, return it as is
-      return {
-        content: [
-          initialStatus,
-          await jsonContent(result, { saveToFile, outputPath }, "matching-nodes"),
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error scanning nodes by types: ${error instanceof Error ? error.message : String(error)
-              }`,
-          },
-        ],
-      };
-    }
-  }
-);
-
 // Text Replacement Strategy Prompt
 server.prompt(
   "text_replacement_strategy",
@@ -2133,10 +2056,10 @@ const textNodes = await scan_text_nodes({
 Get all potential target elements that annotations might refer to:
 
 \`\`\`typescript
-// Scan for all UI elements that could be annotation targets
-const targetNodes = await scan_nodes_by_types({
-  nodeId: selectedNodeId,
-  types: [
+// List all UI elements that could be annotation targets
+const targetNodes = await glob_nodes({
+  root: selectedNodeId,
+  type: [
     "COMPONENT",
     "INSTANCE",
     "FRAME"
@@ -2241,7 +2164,7 @@ This strategy enables transferring content and property overrides from a source 
 
 ### 1. Selection Analysis
 - Use \`get_selection()\` to identify the parent component or selected instances
-- For parent components, scan for instances with \`scan_nodes_by_types({ nodeId: "parent-id", types: ["INSTANCE"] })\`
+- For parent components, list instances with \`glob_nodes({ root: "parent-id", type: "INSTANCE" })\`
 - Identify custom slots by name patterns (e.g. "Custom Slot*" or "Instance Slot") or by examining text content
 - Determine which is the source instance (with content to copy) and which are targets (where to apply content)
 
@@ -2822,7 +2745,6 @@ type FigmaCommand =
   | "get_annotations"
   | "set_annotation"
   | "set_multiple_annotations"
-  | "scan_nodes_by_types"
   | "glob_nodes"
   | "set_layout_mode"
   | "set_padding"
@@ -2962,9 +2884,11 @@ type CommandParams = {
     properties?: Array<{ type: string }>;
   };
   set_multiple_annotations: SetMultipleAnnotationsParams;
-  scan_nodes_by_types: {
-    nodeId: string;
-    types: Array<string>;
+  glob_nodes: {
+    root?: string;
+    name?: string;
+    type?: string | Array<string>;
+    depth?: number;
   };
   get_reactions: { nodeIds: string[] };
   set_default_connector: {

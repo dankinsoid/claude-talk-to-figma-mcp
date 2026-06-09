@@ -200,8 +200,6 @@ async function handleCommand(command, params) {
       return await getAnnotations(params);
     case "set_annotation":
       return await setAnnotation(params);
-    case "scan_nodes_by_types":
-      return await scanNodesByTypes(params);
     case "glob_nodes":
       return await globNodes(params);
     case "set_multiple_annotations":
@@ -2635,69 +2633,6 @@ async function setAnnotation(params) {
   }
 }
 
-/**
- * Scan for nodes with specific types within a node
- * @param {Object} params - Parameters object
- * @param {string} params.nodeId - ID of the node to scan within
- * @param {Array<string>} params.types - Array of node types to find (e.g. ['COMPONENT', 'FRAME'])
- * @returns {Object} - Object containing found nodes
- */
-async function scanNodesByTypes(params) {
-  console.log(`Starting to scan nodes by types from node ID: ${params.nodeId}`);
-  const { nodeId, types = [] } = params || {};
-
-  if (!types || types.length === 0) {
-    throw new Error("No types specified to search for");
-  }
-
-  const node = await figma.getNodeByIdAsync(nodeId);
-
-  if (!node) {
-    throw new Error(`Node with ID ${nodeId} not found`);
-  }
-
-  // Simple implementation without chunking
-  const matchingNodes = [];
-
-  // Send a single progress update to notify start
-  const commandId = generateCommandId();
-  sendProgressUpdate(
-    commandId,
-    "scan_nodes_by_types",
-    "started",
-    0,
-    1,
-    0,
-    `Starting scan of node "${node.name || nodeId}" for types: ${types.join(
-      ", "
-    )}`,
-    null
-  );
-
-  // Recursively find nodes with specified types
-  await findNodesByTypes(node, types, matchingNodes);
-
-  // Send completion update
-  sendProgressUpdate(
-    commandId,
-    "scan_nodes_by_types",
-    "completed",
-    100,
-    matchingNodes.length,
-    matchingNodes.length,
-    `Scan complete. Found ${matchingNodes.length} matching nodes.`,
-    { matchingNodes }
-  );
-
-  return {
-    success: true,
-    message: `Found ${matchingNodes.length} matching nodes.`,
-    count: matchingNodes.length,
-    matchingNodes: matchingNodes,
-    searchedTypes: types,
-  };
-}
-
 // @ai-generated(guided)
 /**
  * Flat, glob-style index of a subtree. Walks every container under `root`
@@ -2768,41 +2703,6 @@ function globToRegExp(glob) {
     else re += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
   return new RegExp("^" + re + "$", "i");
-}
-
-/**
- * Helper function to recursively find nodes with specific types
- * @param {SceneNode} node - The root node to start searching from
- * @param {Array<string>} types - Array of node types to find
- * @param {Array} matchingNodes - Array to store found nodes
- */
-async function findNodesByTypes(node, types, matchingNodes = []) {
-  // Skip invisible nodes
-  if (node.visible === false) return;
-
-  // Check if this node is one of the specified types
-  if (types.includes(node.type)) {
-    // Create a minimal representation with just ID, type and bbox
-    matchingNodes.push({
-      id: node.id,
-      name: node.name || `Unnamed ${node.type}`,
-      type: node.type,
-      // Basic bounding box info
-      bbox: {
-        x: typeof node.x === "number" ? node.x : 0,
-        y: typeof node.y === "number" ? node.y : 0,
-        width: typeof node.width === "number" ? node.width : 0,
-        height: typeof node.height === "number" ? node.height : 0,
-      },
-    });
-  }
-
-  // Recursively process children of container nodes
-  if ("children" in node) {
-    for (const child of node.children) {
-      await findNodesByTypes(child, types, matchingNodes);
-    }
-  }
 }
 
 // Set multiple annotations with async progress updates

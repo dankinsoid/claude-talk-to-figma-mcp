@@ -141,7 +141,7 @@ The MCP server provides the following tools for interacting with Figma:
 - `get_annotations` - Get all annotations in the current document or specific node
 - `set_annotation` - Create or update an annotation with markdown support
 - `set_multiple_annotations` - Batch create/update multiple annotations efficiently
-- `scan_nodes_by_types` - Scan for nodes with specific types (useful for finding annotation targets)
+- `glob_nodes` - Flat type/name-glob index of a subtree, one node per line as `id:"name".TYPE @parent` (the filesystem-glob analog; useful for finding annotation targets)
 
 ### Prototyping & Connections
 
@@ -246,7 +246,7 @@ When working with the Figma MCP:
    - Verify changes with targeted exports
 10. For converting legacy annotations:
     - Scan text nodes to identify numbered markers and descriptions
-    - Use `scan_nodes_by_types` to find UI elements that annotations refer to
+    - Use `glob_nodes` to find UI elements that annotations refer to
     - Match markers with their target elements using path, name, or proximity
     - Categorize annotations appropriately with `get_annotations`
     - Create native annotations with `set_multiple_annotations` in batches
