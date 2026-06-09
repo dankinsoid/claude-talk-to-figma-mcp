@@ -998,6 +998,43 @@ var GENERATED_FIELDS = {
     "visible": z2.boolean(),
     "x": z2.number(),
     "y": z2.number()
+  },
+  STICKY: {
+    "authorName": z2.string(),
+    "authorVisible": z2.boolean(),
+    "blendMode": BlendMode,
+    "fills": z2.array(Paint),
+    "isWideWidth": z2.boolean(),
+    "locked": z2.boolean(),
+    "maxHeight": z2.number().nullable(),
+    "maxWidth": z2.number().nullable(),
+    "minHeight": z2.number().nullable(),
+    "minWidth": z2.number().nullable(),
+    "name": z2.string(),
+    "opacity": z2.number(),
+    "visible": z2.boolean(),
+    "x": z2.number(),
+    "y": z2.number()
+  },
+  SHAPE_WITH_TEXT: {
+    "blendMode": BlendMode,
+    "fills": z2.array(Paint),
+    "locked": z2.boolean(),
+    "maxHeight": z2.number().nullable(),
+    "maxWidth": z2.number().nullable(),
+    "minHeight": z2.number().nullable(),
+    "minWidth": z2.number().nullable(),
+    "name": z2.string(),
+    "opacity": z2.number(),
+    "rotation": z2.number(),
+    "shapeType": z2.enum(["SQUARE", "ELLIPSE", "ROUNDED_RECTANGLE", "DIAMOND", "TRIANGLE_UP", "TRIANGLE_DOWN", "PARALLELOGRAM_RIGHT", "PARALLELOGRAM_LEFT", "ENG_DATABASE", "ENG_QUEUE", "ENG_FILE", "ENG_FOLDER", "TRAPEZOID", "PREDEFINED_PROCESS", "SHIELD", "DOCUMENT_SINGLE", "DOCUMENT_MULTIPLE", "MANUAL_INPUT", "HEXAGON", "CHEVRON", "PENTAGON", "OCTAGON", "STAR", "PLUS", "ARROW_LEFT", "ARROW_RIGHT", "SUMMING_JUNCTION", "OR", "SPEECH_BUBBLE", "INTERNAL_STORAGE"]),
+    "strokeAlign": StrokeAlign,
+    "strokeJoin": StrokeJoin,
+    "strokeWeight": z2.number(),
+    "strokes": z2.array(Paint),
+    "visible": z2.boolean(),
+    "x": z2.number(),
+    "y": z2.number()
   }
 };
 
@@ -1016,7 +1053,9 @@ var NODE_TYPES = [
   "SLICE",
   "INSTANCE",
   "SVG",
-  "CODE_BLOCK"
+  "CODE_BLOCK",
+  "STICKY",
+  "SHAPE_WITH_TEXT"
 ];
 var NOTES = {
   x: "parent-relative x (ignored inside an auto-layout parent)",
@@ -1045,6 +1084,8 @@ var svgUrl = z3.string().url().optional().describe("URL of an SVG \u2014 fetched
 var children = z3.array(z3.lazy(() => writeNodeUnion)).optional().describe("nested specs, created recursively inside this node");
 var CONTAINER_TYPES = /* @__PURE__ */ new Set(["FRAME", "COMPONENT", "SECTION", "INSTANCE", "SVG"]);
 var REQUIRED = { TEXT: /* @__PURE__ */ new Set(["characters"]) };
+var SUBLAYER_TEXT_TYPES = /* @__PURE__ */ new Set(["STICKY", "SHAPE_WITH_TEXT"]);
+var SUBLAYER_TEXT_FIELDS = ["characters", "fontName", "fontSize", "letterSpacing", "lineHeight", "textAlignHorizontal"];
 var FIELD_OVERRIDES = {
   opacity: z3.number().min(0).max(1),
   cornerRadius: z3.number().min(0),
@@ -1068,6 +1109,15 @@ function compose(type) {
     let field = required.has(key) ? base : base.optional();
     if (NOTES[key]) field = field.describe(NOTES[key]);
     shape[key] = field;
+  }
+  if (SUBLAYER_TEXT_TYPES.has(type)) {
+    const textGen = GENERATED_FIELDS.TEXT ?? {};
+    for (const key of SUBLAYER_TEXT_FIELDS) {
+      if (shape[key] || !textGen[key]) continue;
+      let field = textGen[key].optional();
+      if (NOTES[key]) field = field.describe(NOTES[key]);
+      shape[key] = field;
+    }
   }
   shape.parentId = parentId;
   shape.index = index;

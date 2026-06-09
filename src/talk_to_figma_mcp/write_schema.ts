@@ -29,6 +29,7 @@ import { Color, Paint } from "./shared-schemas.js";
 export const NODE_TYPES = [
   "FRAME", "TEXT", "RECTANGLE", "ELLIPSE", "LINE", "STAR", "POLYGON",
   "VECTOR", "COMPONENT", "SECTION", "SLICE", "INSTANCE", "SVG", "CODE_BLOCK",
+  "STICKY", "SHAPE_WITH_TEXT",
 ] as const;
 export type NodeType = (typeof NODE_TYPES)[number];
 
@@ -67,6 +68,12 @@ const children = z.array(z.lazy((): z.ZodTypeAny => writeNodeUnion)).optional().
 const CONTAINER_TYPES = new Set<NodeType>(["FRAME", "COMPONENT", "SECTION", "INSTANCE", "SVG"]);
 const REQUIRED: Partial<Record<NodeType, Set<string>>> = { TEXT: new Set(["characters"]) };
 
+// FigJam STICKY/SHAPE_WITH_TEXT carry their text on a `.text` TextSublayer, so the
+// generated node interface omits these fields. Graft them from TEXT (the plugin
+// routes them onto node.text — see TEXT_SUBLAYER_KEYS in code.js).
+const SUBLAYER_TEXT_TYPES = new Set<NodeType>(["STICKY", "SHAPE_WITH_TEXT"]);
+const SUBLAYER_TEXT_FIELDS = ["characters", "fontName", "fontSize", "letterSpacing", "lineHeight", "textAlignHorizontal"];
+
 // Range constraints Figma enforces at runtime but doesn't encode in its types
 // (it types these as bare `number`) — restored so the gate rejects them up front.
 const FIELD_OVERRIDES: Record<string, z.ZodTypeAny> = {
@@ -97,6 +104,15 @@ function compose(type: NodeType): z.ZodTypeAny {
     let field = required.has(key) ? base : base.optional();
     if (NOTES[key]) field = field.describe(NOTES[key]);
     shape[key] = field;
+  }
+  if (SUBLAYER_TEXT_TYPES.has(type)) {
+    const textGen: Record<string, z.ZodTypeAny> = GENERATED_FIELDS.TEXT ?? {};
+    for (const key of SUBLAYER_TEXT_FIELDS) {
+      if (shape[key] || !textGen[key]) continue;
+      let field = textGen[key].optional();
+      if (NOTES[key]) field = field.describe(NOTES[key]);
+      shape[key] = field;
+    }
   }
   shape.parentId = parentId;
   shape.index = index;

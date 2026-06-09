@@ -1020,6 +1020,43 @@ var GENERATED_FIELDS = {
     "visible": import_zod2.z.boolean(),
     "x": import_zod2.z.number(),
     "y": import_zod2.z.number()
+  },
+  STICKY: {
+    "authorName": import_zod2.z.string(),
+    "authorVisible": import_zod2.z.boolean(),
+    "blendMode": BlendMode,
+    "fills": import_zod2.z.array(Paint),
+    "isWideWidth": import_zod2.z.boolean(),
+    "locked": import_zod2.z.boolean(),
+    "maxHeight": import_zod2.z.number().nullable(),
+    "maxWidth": import_zod2.z.number().nullable(),
+    "minHeight": import_zod2.z.number().nullable(),
+    "minWidth": import_zod2.z.number().nullable(),
+    "name": import_zod2.z.string(),
+    "opacity": import_zod2.z.number(),
+    "visible": import_zod2.z.boolean(),
+    "x": import_zod2.z.number(),
+    "y": import_zod2.z.number()
+  },
+  SHAPE_WITH_TEXT: {
+    "blendMode": BlendMode,
+    "fills": import_zod2.z.array(Paint),
+    "locked": import_zod2.z.boolean(),
+    "maxHeight": import_zod2.z.number().nullable(),
+    "maxWidth": import_zod2.z.number().nullable(),
+    "minHeight": import_zod2.z.number().nullable(),
+    "minWidth": import_zod2.z.number().nullable(),
+    "name": import_zod2.z.string(),
+    "opacity": import_zod2.z.number(),
+    "rotation": import_zod2.z.number(),
+    "shapeType": import_zod2.z.enum(["SQUARE", "ELLIPSE", "ROUNDED_RECTANGLE", "DIAMOND", "TRIANGLE_UP", "TRIANGLE_DOWN", "PARALLELOGRAM_RIGHT", "PARALLELOGRAM_LEFT", "ENG_DATABASE", "ENG_QUEUE", "ENG_FILE", "ENG_FOLDER", "TRAPEZOID", "PREDEFINED_PROCESS", "SHIELD", "DOCUMENT_SINGLE", "DOCUMENT_MULTIPLE", "MANUAL_INPUT", "HEXAGON", "CHEVRON", "PENTAGON", "OCTAGON", "STAR", "PLUS", "ARROW_LEFT", "ARROW_RIGHT", "SUMMING_JUNCTION", "OR", "SPEECH_BUBBLE", "INTERNAL_STORAGE"]),
+    "strokeAlign": StrokeAlign,
+    "strokeJoin": StrokeJoin,
+    "strokeWeight": import_zod2.z.number(),
+    "strokes": import_zod2.z.array(Paint),
+    "visible": import_zod2.z.boolean(),
+    "x": import_zod2.z.number(),
+    "y": import_zod2.z.number()
   }
 };
 
@@ -1038,7 +1075,9 @@ var NODE_TYPES = [
   "SLICE",
   "INSTANCE",
   "SVG",
-  "CODE_BLOCK"
+  "CODE_BLOCK",
+  "STICKY",
+  "SHAPE_WITH_TEXT"
 ];
 var NOTES = {
   x: "parent-relative x (ignored inside an auto-layout parent)",
@@ -1067,6 +1106,8 @@ var svgUrl = import_zod3.z.string().url().optional().describe("URL of an SVG \u2
 var children = import_zod3.z.array(import_zod3.z.lazy(() => writeNodeUnion)).optional().describe("nested specs, created recursively inside this node");
 var CONTAINER_TYPES = /* @__PURE__ */ new Set(["FRAME", "COMPONENT", "SECTION", "INSTANCE", "SVG"]);
 var REQUIRED = { TEXT: /* @__PURE__ */ new Set(["characters"]) };
+var SUBLAYER_TEXT_TYPES = /* @__PURE__ */ new Set(["STICKY", "SHAPE_WITH_TEXT"]);
+var SUBLAYER_TEXT_FIELDS = ["characters", "fontName", "fontSize", "letterSpacing", "lineHeight", "textAlignHorizontal"];
 var FIELD_OVERRIDES = {
   opacity: import_zod3.z.number().min(0).max(1),
   cornerRadius: import_zod3.z.number().min(0),
@@ -1090,6 +1131,15 @@ function compose(type) {
     let field = required.has(key) ? base : base.optional();
     if (NOTES[key]) field = field.describe(NOTES[key]);
     shape[key] = field;
+  }
+  if (SUBLAYER_TEXT_TYPES.has(type)) {
+    const textGen = GENERATED_FIELDS.TEXT ?? {};
+    for (const key of SUBLAYER_TEXT_FIELDS) {
+      if (shape[key] || !textGen[key]) continue;
+      let field = textGen[key].optional();
+      if (NOTES[key]) field = field.describe(NOTES[key]);
+      shape[key] = field;
+    }
   }
   shape.parentId = parentId;
   shape.index = index;

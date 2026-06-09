@@ -423,6 +423,12 @@ function filterFigmaNode(node) {
     filtered.characters = node.characters;
   }
 
+  // FigJam SHAPE_WITH_TEXT: the shape silhouette (DIAMOND/ROUNDED_RECTANGLE/…),
+  // which the REST export carries but the generic copy above doesn't forward.
+  if (node.shapeType) {
+    filtered.shapeType = node.shapeType;
+  }
+
   if (node.style) {
     filtered.style = {
       fontFamily: node.style.fontFamily,
@@ -733,8 +739,19 @@ const NODE_FACTORIES = {
   COMPONENT: () => figma.createComponent(),
   SECTION: () => figma.createSection(),
   SLICE: () => figma.createSlice(),
-  CODE_BLOCK: () => figma.createCodeBlock(), // FigJam-only; throws in a Figma design file
+  CODE_BLOCK: () => figma.createCodeBlock(),
+  STICKY: () => figma.createSticky(),
+  SHAPE_WITH_TEXT: () => figma.createShapeWithText(),
 };
+
+// FigJam-only node types: the create* constructors throw in a Figma design file,
+// so we pre-check figma.editorType and fail with a clear message instead.
+const FIGJAM_TYPES = new Set(["CODE_BLOCK", "STICKY", "SHAPE_WITH_TEXT"]);
+
+// FigJam sticky/shape/connector hold their text on a readonly `.text`
+// TextSublayerNode, not on the node itself — these keys route there.
+const TEXT_SUBLAYER_TYPES = new Set(["STICKY", "SHAPE_WITH_TEXT", "CONNECTOR"]);
+const TEXT_SUBLAYER_KEYS = new Set(["characters", "fontName", "fontSize", "textAlignHorizontal", "letterSpacing", "lineHeight"]);
 
 // Keys consumed by the spec itself rather than written onto the node.
 const WRITE_RESERVED = new Set(["type", "parentId", "index", "children", "id", "componentId", "componentKey", "svg", "svgUrl", "svgError"]);
@@ -779,7 +796,32 @@ function coerceColors(val) {
   return val;
 }
 
+// Apply a text-ish prop onto a FigJam node's `.text` TextSublayer. Mirrors the
+// TEXT-node handling below (a font must be loaded before characters/fontSize).
+async function setSublayerTextProp(sub, key, value) {
+  if (key === "characters") {
+    await setCharacters(sub, String(value)); // loads the sublayer's font (with fallback) itself
+    return;
+  }
+  if (key === "fontName") {
+    await figma.loadFontAsync(value);
+    sub.fontName = value;
+    return;
+  }
+  if (key === "fontSize") {
+    if (sub.fontName && sub.fontName !== figma.mixed) await figma.loadFontAsync(sub.fontName);
+    sub.fontSize = value;
+    return;
+  }
+  sub[key] = coerceTypedUnit(key, value); // textAlignHorizontal / letterSpacing / lineHeight
+}
+
 async function setWriteProp(node, key, value) {
+  // FigJam sticky/shape/connector: text-ish props live on node.text, not the node.
+  if (TEXT_SUBLAYER_TYPES.has(node.type) && TEXT_SUBLAYER_KEYS.has(key)) {
+    await setSublayerTextProp(node.text, key, value);
+    return;
+  }
   if (key === "characters") {
     if (node.type !== "TEXT") throw new Error(`characters can only be set on TEXT nodes, not ${node.type}`);
     await setCharacters(node, String(value)); // loads the node's font (with fallback) itself
@@ -819,6 +861,9 @@ async function createOneNode(spec, fallbackParent, counts, progress) {
   let node;
   try {
     if (!type) throw new Error("node spec needs a `type`");
+    if (FIGJAM_TYPES.has(type) && figma.editorType !== "figjam") {
+      throw new Error(`${type} requires a FigJam file (current editor: ${figma.editorType})`);
+    }
     if (type === "INSTANCE") {
       node = await instantiateComponent(spec);
     } else if (type === "SVG") {

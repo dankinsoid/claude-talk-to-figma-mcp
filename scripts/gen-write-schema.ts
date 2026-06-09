@@ -26,6 +26,7 @@ const TYPE_TO_IFACE: Record<string, string> = {
   LINE: "LineNode", STAR: "StarNode", POLYGON: "PolygonNode", VECTOR: "VectorNode",
   COMPONENT: "ComponentNode", SECTION: "SectionNode", SLICE: "SliceNode", INSTANCE: "InstanceNode",
   CODE_BLOCK: "CodeBlockNode",
+  STICKY: "StickyNode", SHAPE_WITH_TEXT: "ShapeWithTextNode",
 };
 
 // Named Figma types we already hand-model in shared-schemas.ts — referenced by
