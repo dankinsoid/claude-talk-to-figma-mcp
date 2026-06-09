@@ -139,8 +139,7 @@ The MCP server provides the following tools for interacting with Figma:
 ### Annotations
 
 - `get_annotations` - Get all annotations in the current document or specific node
-- `set_annotation` - Create or update an annotation with markdown support
-- `set_multiple_annotations` - Batch create/update multiple annotations efficiently
+- `set_annotations` - Create or update one or more annotations with markdown support; each entry independent, large batches chunked
 - `glob_nodes` - Flat type/name-glob index of a subtree, one node per line as `id:"name".TYPE @parent` (the filesystem-glob analog; useful for finding annotation targets)
 - `grep_nodes` - Regex search over the text content of a subtree, line-oriented (the grep analog); reports matching lines as `id:"name".TEXT @parent L<n>: <line>`
 - `query_nodes` - Structural search by field predicates (`{path, op, value}`, AND-combined) — match on any node-model field (fontSize, fills color, bound variables, etc.), including key presence via `exists`/`absent`
@@ -163,10 +162,7 @@ The MCP server provides the following tools for interacting with Figma:
 
 ### Styling
 
-- `set_fill_color` - Set the fill color of a node (RGBA); creates the fill if the node has none
-- `set_stroke_color` - Set the stroke color and weight of a node
-
-> Other property edits (text, layout, geometry, corner radius, padding, spacing, position, size) go through `edit_nodes` — see [Editing Nodes](#editing-nodes).
+> Colors and all other property edits (fills, strokes, text, layout, geometry, corner radius, padding, spacing, position, size) go through `edit_nodes` — e.g. set `fills` to `[{type:"SOLID",color:"#3366ff"}]`, or `strokes` + `strokeWeight`. See [Editing Nodes](#editing-nodes).
 
 ### Layout & Organization
 
@@ -239,7 +235,7 @@ When working with the Figma MCP:
     - Use `glob_nodes` to find UI elements that annotations refer to
     - Match markers with their target elements using path, name, or proximity
     - Categorize annotations appropriately with `get_annotations`
-    - Create native annotations with `set_multiple_annotations` in batches
+    - Create native annotations with `set_annotations` in one batch
     - Verify all annotations are properly linked to their targets
     - Delete legacy annotation nodes after successful conversion
 11. Visualize prototype noodles as FigJam connectors:

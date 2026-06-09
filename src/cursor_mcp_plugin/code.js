@@ -155,10 +155,6 @@ async function handleCommand(command, params) {
       return await writeNodes(params);
     case "edit_nodes":
       return await editNodes(params);
-    case "set_fill_color":
-      return await setFillColor(params);
-    case "set_stroke_color":
-      return await setStrokeColor(params);
     case "delete_nodes":
       return await deleteNodes(params);
     case "get_styles":
@@ -173,16 +169,14 @@ async function handleCommand(command, params) {
       return await cloneNode(params);
     case "get_annotations":
       return await getAnnotations(params);
-    case "set_annotation":
-      return await setAnnotation(params);
+    case "set_annotations":
+      return await setAnnotations(params);
     case "glob_nodes":
       return await globNodes(params);
     case "grep_nodes":
       return await grepNodes(params);
     case "query_nodes":
       return await queryNodes(params);
-    case "set_multiple_annotations":
-      return await setMultipleAnnotations(params);
     case "get_instance_overrides":
       // Check if instanceNode parameter is provided
       if (params && params.instanceNodeId) {
@@ -851,109 +845,7 @@ async function instantiateComponent(spec) {
   return component.createInstance();
 }
 
-async function setFillColor(params) {
-  console.log("setFillColor", params);
-  const {
-    nodeId,
-    color: { r, g, b, a },
-  } = params || {};
-
-  if (!nodeId) {
-    throw new Error("Missing nodeId parameter");
-  }
-
-  const node = await figma.getNodeByIdAsync(nodeId);
-  if (!node) {
-    throw new Error(`Node not found with ID: ${nodeId}`);
-  }
-
-  if (!("fills" in node)) {
-    throw new Error(`Node does not support fills: ${nodeId}`);
-  }
-
-  // Create RGBA color
-  const rgbColor = {
-    r: parseFloat(r) || 0,
-    g: parseFloat(g) || 0,
-    b: parseFloat(b) || 0,
-    a: parseFloat(a) || 1,
-  };
-
-  // Set fill
-  const paintStyle = {
-    type: "SOLID",
-    color: {
-      r: parseFloat(rgbColor.r),
-      g: parseFloat(rgbColor.g),
-      b: parseFloat(rgbColor.b),
-    },
-    opacity: parseFloat(rgbColor.a),
-  };
-
-  console.log("paintStyle", paintStyle);
-
-  node.fills = [paintStyle];
-
-  return {
-    id: node.id,
-    name: node.name,
-    fills: [paintStyle],
-  };
-}
-
-async function setStrokeColor(params) {
-  const {
-    nodeId,
-    color: { r, g, b, a },
-    weight = 1,
-  } = params || {};
-
-  if (!nodeId) {
-    throw new Error("Missing nodeId parameter");
-  }
-
-  const node = await figma.getNodeByIdAsync(nodeId);
-  if (!node) {
-    throw new Error(`Node not found with ID: ${nodeId}`);
-  }
-
-  if (!("strokes" in node)) {
-    throw new Error(`Node does not support strokes: ${nodeId}`);
-  }
-
-  // Create RGBA color
-  const rgbColor = {
-    r: r !== undefined ? r : 0,
-    g: g !== undefined ? g : 0,
-    b: b !== undefined ? b : 0,
-    a: a !== undefined ? a : 1,
-  };
-
-  // Set stroke
-  const paintStyle = {
-    type: "SOLID",
-    color: {
-      r: rgbColor.r,
-      g: rgbColor.g,
-      b: rgbColor.b,
-    },
-    opacity: rgbColor.a,
-  };
-
-  node.strokes = [paintStyle];
-
-  // Set stroke weight if available
-  if ("strokeWeight" in node) {
-    node.strokeWeight = weight;
-  }
-
-  return {
-    id: node.id,
-    name: node.name,
-    strokes: node.strokes,
-    strokeWeight: "strokeWeight" in node ? node.strokeWeight : undefined,
-  };
-}
+// Fill/stroke colors are set via edit_nodes (fills/strokes/strokeWeight paths) — no dedicated handler.
 
 async function getStyles() {
   const styles = {
@@ -2304,20 +2196,18 @@ function hexNorm(s) {
 }
 
 // Set multiple annotations with async progress updates
-async function setMultipleAnnotations(params) {
-  console.log("=== setMultipleAnnotations Debug Start ===");
+async function setAnnotations(params) {
+  console.log("=== setAnnotations Debug Start ===");
   console.log("Input params:", JSON.stringify(params, null, 2));
 
-  const { nodeId, annotations } = params;
+  const { annotations } = params;
 
   if (!annotations || annotations.length === 0) {
     console.error("Validation failed: No annotations provided");
     return { success: false, error: "No annotations provided" };
   }
 
-  console.log(
-    `Processing ${annotations.length} annotations for node ${nodeId}`
-  );
+  console.log(`Processing ${annotations.length} annotations`);
 
   const results = [];
   let successCount = 0;
@@ -2385,9 +2275,9 @@ async function setMultipleAnnotations(params) {
     results: results,
   };
 
-  console.log("\n=== setMultipleAnnotations Summary ===");
+  console.log("\n=== setAnnotations Summary ===");
   console.log(JSON.stringify(summary, null, 2));
-  console.log("=== setMultipleAnnotations Debug End ===");
+  console.log("=== setAnnotations Debug End ===");
 
   return summary;
 }

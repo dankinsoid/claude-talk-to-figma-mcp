@@ -74,6 +74,6 @@ claude mcp add TalkToFigma -- bunx cursor-talk-to-figma-mcp@latest
 - Always call `join_channel` before issuing any Figma commands
 - Call `get_document_info` first to understand the design structure
 - Use `read_my_design` or `get_selection` before making modifications
-- Batch operations (`edit_nodes`, `delete_multiple_nodes`, `set_multiple_annotations`) are preferred over repeated single-node calls for performance — e.g. `edit_nodes` applies many property/text edits across many nodes in one call
+- Batch operations (`edit_nodes`, `delete_nodes`, `set_annotations`) are preferred over repeated single-node calls for performance — e.g. `edit_nodes` applies many property/text edits across many nodes in one call
 - All MCP tool parameters are Zod-validated; invalid inputs return structured errors
 - The plugin and relay must both be running before any tool calls succeed

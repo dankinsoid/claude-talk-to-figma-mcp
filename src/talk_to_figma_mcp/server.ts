@@ -690,89 +690,8 @@ server.tool(
   }
 );
 
-// Set Fill Color Tool
-server.tool(
-  "set_fill_color",
-  "Set the fill color of a node in Figma can be TextNode or FrameNode",
-  {
-    nodeId: z.string().describe("The ID of the node to modify"),
-    r: z.number().min(0).max(1).describe("Red component (0-1)"),
-    g: z.number().min(0).max(1).describe("Green component (0-1)"),
-    b: z.number().min(0).max(1).describe("Blue component (0-1)"),
-    a: z.number().min(0).max(1).optional().describe("Alpha component (0-1)"),
-  },
-  async ({ nodeId, r, g, b, a }: any) => {
-    try {
-      const result = await sendCommandToFigma("set_fill_color", {
-        nodeId,
-        color: { r, g, b, a: a || 1 },
-      });
-      const typedResult = result as { name: string };
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Set fill color of node "${typedResult.name
-              }" to RGBA(${r}, ${g}, ${b}, ${a || 1})`,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error setting fill color: ${error instanceof Error ? error.message : String(error)
-              }`,
-          },
-        ],
-      };
-    }
-  }
-);
-
-// Set Stroke Color Tool
-server.tool(
-  "set_stroke_color",
-  "Set the stroke color of a node in Figma",
-  {
-    nodeId: z.string().describe("The ID of the node to modify"),
-    r: z.number().min(0).max(1).describe("Red component (0-1)"),
-    g: z.number().min(0).max(1).describe("Green component (0-1)"),
-    b: z.number().min(0).max(1).describe("Blue component (0-1)"),
-    a: z.number().min(0).max(1).optional().describe("Alpha component (0-1)"),
-    weight: z.number().positive().optional().describe("Stroke weight"),
-  },
-  async ({ nodeId, r, g, b, a, weight }: any) => {
-    try {
-      const result = await sendCommandToFigma("set_stroke_color", {
-        nodeId,
-        color: { r, g, b, a: a || 1 },
-        weight: weight || 1,
-      });
-      const typedResult = result as { name: string };
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Set stroke color of node "${typedResult.name
-              }" to RGBA(${r}, ${g}, ${b}, ${a || 1}) with weight ${weight || 1}`,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error setting stroke color: ${error instanceof Error ? error.message : String(error)
-              }`,
-          },
-        ],
-      };
-    }
-  }
-);
+// Fill/stroke colors are set via edit_nodes — e.g. {path:"fills",new:[{type:"SOLID",color:"#3366ff"}]}
+// or {path:"strokes",...} + {path:"strokeWeight",...}. No dedicated tools.
 
 // Clone Node Tool
 server.tool(
@@ -974,68 +893,11 @@ server.tool(
   }
 );
 
-// Set Annotation Tool
+// Set Annotations Tool — variadic create/update of native Figma annotations
 server.tool(
-  "set_annotation",
-  "Create or update an annotation",
+  "set_annotations",
+  "Create or update one or more native Figma annotations. Pass `annotations`: an array of `{nodeId, labelMarkdown, categoryId?, annotationId?, properties?}`. Each entry annotates its own `nodeId` with markdown text; supply `annotationId` to update an existing annotation instead of creating one, and `categoryId` to file it under an annotation category (from get_annotations). Entries are applied independently — one failing records its error and the rest still apply. Large batches are chunked with progress updates so a long run won't time out. The result lists each entry as `✓ <id>` or `✗ <id>: <error>`.",
   {
-    nodeId: z.string().describe("The ID of the node to annotate"),
-    annotationId: z.string().optional().describe("The ID of the annotation to update (if updating existing annotation)"),
-    labelMarkdown: z.string().describe("The annotation text in markdown format"),
-    categoryId: z.string().optional().describe("The ID of the annotation category"),
-    properties: z.array(z.object({
-      type: z.string()
-    })).optional().describe("Additional properties for the annotation")
-  },
-  async ({ nodeId, annotationId, labelMarkdown, categoryId, properties }: any) => {
-    try {
-      const result = await sendCommandToFigma("set_annotation", {
-        nodeId,
-        annotationId,
-        labelMarkdown,
-        categoryId,
-        properties
-      });
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(result)
-          }
-        ]
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error setting annotation: ${error instanceof Error ? error.message : String(error)}`
-          }
-        ]
-      };
-    }
-  }
-);
-
-interface SetMultipleAnnotationsParams {
-  nodeId: string;
-  annotations: Array<{
-    nodeId: string;
-    labelMarkdown: string;
-    categoryId?: string;
-    annotationId?: string;
-    properties?: Array<{ type: string }>;
-  }>;
-}
-
-// Set Multiple Annotations Tool
-server.tool(
-  "set_multiple_annotations",
-  "Set multiple annotations parallelly in a node",
-  {
-    nodeId: z
-      .string()
-      .describe("The ID of the node containing the elements to annotate"),
     annotations: z
       .array(
         z.object({
@@ -1048,92 +910,26 @@ server.tool(
           })).optional().describe("Additional properties for the annotation")
         })
       )
-      .describe("Array of annotations to apply"),
+      .min(1)
+      .describe("Annotations to apply; each independent — one failing does not abort the rest."),
   },
-  async ({ nodeId, annotations }: any) => {
+  async ({ annotations }: any) => {
     try {
-      if (!annotations || annotations.length === 0) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "No annotations provided",
-            },
-          ],
-        };
-      }
-
-      // Initial response to indicate we're starting the process
-      const initialStatus = {
-        type: "text" as const,
-        text: `Starting annotation process for ${annotations.length} nodes. This will be processed in batches of 5...`,
-      };
-
-      // Track overall progress
-      let totalProcessed = 0;
-      const totalToProcess = annotations.length;
-
-      // Use the plugin's set_multiple_annotations function with chunking
-      const result = await sendCommandToFigma("set_multiple_annotations", {
-        nodeId,
-        annotations,
+      const result: any = await sendCommandToFigma("set_annotations", { annotations });
+      const rows = (result?.results || []).map((r: any) => {
+        const id = renumberIds({ id: r.nodeId }).id;
+        return r.success ? `✓ ${id}` : `✗ ${id}: ${r.error || "Unknown error"}`;
       });
-
-      // Cast the result to a specific type to work with it safely
-      interface AnnotationResult {
-        success: boolean;
-        nodeId: string;
-        annotationsApplied?: number;
-        annotationsFailed?: number;
-        totalAnnotations?: number;
-        completedInChunks?: number;
-        results?: Array<{
-          success: boolean;
-          nodeId: string;
-          error?: string;
-          annotationId?: string;
-        }>;
-      }
-
-      const typedResult = result as AnnotationResult;
-
-      // Format the results for display
-      const success = typedResult.annotationsApplied && typedResult.annotationsApplied > 0;
-      const progressText = `
-      Annotation process completed:
-      - ${typedResult.annotationsApplied || 0} of ${totalToProcess} successfully applied
-      - ${typedResult.annotationsFailed || 0} failed
-      - Processed in ${typedResult.completedInChunks || 1} batches
-      `;
-
-      // Detailed results
-      const detailedResults = typedResult.results || [];
-      const failedResults = detailedResults.filter(item => !item.success);
-
-      // Create the detailed part of the response
-      let detailedResponse = "";
-      if (failedResults.length > 0) {
-        detailedResponse = `\n\nNodes that failed:\n${failedResults.map(item =>
-          `- ${item.nodeId}: ${item.error || "Unknown error"}`
-        ).join('\n')}`;
-      }
-
-      return {
-        content: [
-          initialStatus,
-          {
-            type: "text" as const,
-            text: progressText + detailedResponse,
-          },
-        ],
-      };
+      const text =
+        `applied ${result?.annotationsApplied || 0}/${result?.totalAnnotations || annotations.length}` +
+        (rows.length ? "\n" + rows.join("\n") : "");
+      return { content: [{ type: "text", text }] };
     } catch (error) {
       return {
         content: [
           {
             type: "text",
-            text: `Error setting multiple annotations: ${error instanceof Error ? error.message : String(error)
-              }`,
+            text: `Error setting annotations: ${error instanceof Error ? error.message : String(error)}`,
           },
         ],
       };
@@ -1610,10 +1406,9 @@ const annotationsToApply = Object.values(annotations).map(({ marker, description
   return null;
 }).filter(Boolean); // Remove null entries
 
-// Apply annotations in batches using set_multiple_annotations
+// Apply annotations in one batch using set_annotations
 if (annotationsToApply.length > 0) {
-  await set_multiple_annotations({
-    nodeId: selectedNodeId,
+  await set_annotations({
     annotations: annotationsToApply
   });
 }
@@ -1962,8 +1757,6 @@ type FigmaCommand =
   | "read_node"
   | "read_node_raw"
   | "write_nodes"
-  | "set_fill_color"
-  | "set_stroke_color"
   | "delete_nodes"
   | "get_styles"
   | "get_local_components"
@@ -1973,8 +1766,7 @@ type FigmaCommand =
   | "join"
   | "clone_node"
   | "get_annotations"
-  | "set_annotation"
-  | "set_multiple_annotations"
+  | "set_annotations"
   | "glob_nodes"
   | "grep_nodes"
   | "query_nodes"
@@ -1992,21 +1784,6 @@ type CommandParams = {
   read_node_raw: { nodeId: string };
   write_nodes: {
     nodes: Array<Record<string, any>>;
-  };
-  set_fill_color: {
-    nodeId: string;
-    r: number;
-    g: number;
-    b: number;
-    a?: number;
-  };
-  set_stroke_color: {
-    nodeId: string;
-    r: number;
-    g: number;
-    b: number;
-    a?: number;
-    weight?: number;
   };
   delete_nodes: {
     nodeIds: string[];
@@ -2041,14 +1818,15 @@ type CommandParams = {
     nodeId?: string;
     includeCategories?: boolean;
   };
-  set_annotation: {
-    nodeId: string;
-    annotationId?: string;
-    labelMarkdown: string;
-    categoryId?: string;
-    properties?: Array<{ type: string }>;
+  set_annotations: {
+    annotations: Array<{
+      nodeId: string;
+      labelMarkdown: string;
+      categoryId?: string;
+      annotationId?: string;
+      properties?: Array<{ type: string }>;
+    }>;
   };
-  set_multiple_annotations: SetMultipleAnnotationsParams;
   glob_nodes: {
     root?: string;
     name?: string;
