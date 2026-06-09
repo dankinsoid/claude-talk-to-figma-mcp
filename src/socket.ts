@@ -128,6 +128,17 @@ const server = Bun.serve({
           return;
         }
 
+        // Plugin pushes refreshed file context (page switch / rename) without
+        // rejoining. Update the recorded channel meta and persist.
+        if (data.type === "meta") {
+          const entry = pluginChannels.get(ws);
+          if (entry) {
+            entry.meta = data.meta;
+            writeActiveChannels();
+          }
+          return;
+        }
+
         if (data.type === "join") {
           const channelName = data.channel;
           if (!channelName || typeof channelName !== "string") {
@@ -151,7 +162,7 @@ const server = Bun.serve({
 
           // Record plugin-opened channels so the agent can auto-discover them.
           if (data.role === "plugin") {
-            pluginChannels.set(ws, channelName);
+            pluginChannels.set(ws, { channel: channelName, meta: data.meta });
             writeActiveChannels();
           }
 

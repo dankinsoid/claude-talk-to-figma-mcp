@@ -3451,7 +3451,7 @@ async function readActiveChannels() {
 }
 server.tool(
   "get_active_channel",
-  "Get the channel(s) the Figma plugin currently has open, as recorded by the WebSocket relay. Use this to discover the channel to join without asking the user to paste it.",
+  "Get the channel(s) the Figma plugin currently has open, as recorded by the WebSocket relay. Each entry includes meta about the open file (name, current page, editorType: figma/figjam/dev/slides). Use this to discover the channel to join without asking the user to paste it.",
   {},
   async () => {
     const active = await readActiveChannels();
@@ -3492,7 +3492,9 @@ server.tool(
             content: [
               {
                 type: "text",
-                text: `Multiple active channels found, pass one explicitly: ${active.map((c) => c.channel).join(", ")}`
+                text: `Multiple active channels found, pass one explicitly: ${active.map(
+                  (c) => c.meta?.name ? `${c.channel} (${c.meta.name}${c.meta.editorType ? `, ${c.meta.editorType}` : ""})` : c.channel
+                ).join(", ")}`
               }
             ]
           };
