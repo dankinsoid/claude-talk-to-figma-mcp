@@ -616,6 +616,47 @@ async function getReactions(nodeIds) {
 // Each spec is { type, ...props, children? }. Specs and children are independent
 // — a failing one records its Figma error without aborting the rest — and large
 // batches stream progress so a long run won't trip the 30s command timeout.
+// Count every spec in the tree (roots + all descendants) so progress reflects
+// real work, not just the root count — a single root with a deep subtree still
+// streams. Cheap walk; no node creation.
+function countSpecNodes(specs) {
+  let n = 0;
+  for (const spec of specs) {
+    n++;
+    if (spec && Array.isArray(spec.children) && spec.children.length) {
+      n += countSpecNodes(spec.children);
+    }
+  }
+  return n;
+}
+
+// Stream a progress update at most every PROGRESS_EVERY_NODES nodes or every
+// PROGRESS_EVERY_MS, whichever comes first. The cadence matters: each update
+// resets the MCP server's inactivity timer, so a long create (many nodes, slow
+// font loads) never trips the timeout even within one deep subtree.
+const PROGRESS_EVERY_NODES = 5;
+const PROGRESS_EVERY_MS = 1500;
+async function maybeEmitProgress(progress, counts) {
+  if (!progress) return;
+  const now = Date.now();
+  if (
+    counts.total - progress.lastCount < PROGRESS_EVERY_NODES &&
+    now - progress.lastTime < PROGRESS_EVERY_MS
+  ) {
+    return;
+  }
+  progress.lastCount = counts.total;
+  progress.lastTime = now;
+  // Cap at 99% until the final completed update; the expected total is a lower
+  // bound (failed specs skip their children) so the ratio can run high.
+  const pct = Math.min(99, Math.round((counts.total / progress.totalExpected) * 100));
+  await sendProgressUpdate(
+    progress.commandId, "write_nodes", "in_progress",
+    pct, progress.totalExpected, counts.total,
+    `Created ${counts.created}/${progress.totalExpected} nodes`
+  );
+}
+
 async function writeNodes(params) {
   const { nodes } = params || {};
   if (!Array.isArray(nodes) || nodes.length === 0) {
@@ -624,27 +665,23 @@ async function writeNodes(params) {
 
   const counts = { created: 0, total: 0 };
   const commandId = (params && params.commandId) || generateCommandId();
-  // Top-level spec count is a lower bound on work; good enough to decide whether
-  // to bother streaming (subtrees only push the real total higher).
-  const reportProgress = nodes.length > 3;
+  const totalExpected = countSpecNodes(nodes);
+  const reportProgress = totalExpected > 3;
+  // Throttle state threaded through the recursion so descendants emit too.
+  const progress = reportProgress
+    ? { commandId, totalExpected, lastCount: 0, lastTime: Date.now() }
+    : null;
   if (reportProgress) {
-    await sendProgressUpdate(commandId, "write_nodes", "started", 0, nodes.length, 0, `Creating ${nodes.length} nodes...`);
+    await sendProgressUpdate(commandId, "write_nodes", "started", 0, totalExpected, 0, `Creating ${totalExpected} nodes...`);
   }
 
   const results = [];
   for (let i = 0; i < nodes.length; i++) {
-    results.push(await createOneNode(nodes[i], figma.currentPage, counts));
-    if (reportProgress && i + 1 < nodes.length) {
-      await sendProgressUpdate(
-        commandId, "write_nodes", "in_progress",
-        Math.round(((i + 1) / nodes.length) * 100), nodes.length, i + 1,
-        `Created ${counts.created} nodes (${i + 1}/${nodes.length} roots)`
-      );
-    }
+    results.push(await createOneNode(nodes[i], figma.currentPage, counts, progress));
   }
 
   if (reportProgress) {
-    await sendProgressUpdate(commandId, "write_nodes", "completed", 100, nodes.length, nodes.length, `Done: ${counts.created} nodes created`);
+    await sendProgressUpdate(commandId, "write_nodes", "completed", 100, totalExpected, counts.total, `Done: ${counts.created} nodes created`);
   }
 
   return { created: counts.created, total: counts.total, results };
@@ -717,13 +754,23 @@ async function setWriteProp(node, key, value) {
   if (key === "fontSize" && node.type === "TEXT" && node.fontName && node.fontName !== figma.mixed) {
     await figma.loadFontAsync(node.fontName);
   }
-  node[key] = coerceColors(value);
+  node[key] = coerceColors(coerceTypedUnit(key, value));
+}
+
+// Figma's letterSpacing/lineHeight are {value, unit} objects — a bare number
+// would throw. Accept the number as a PIXELS shorthand (the common intent);
+// callers pass the object form for PERCENT/AUTO.
+function coerceTypedUnit(key, value) {
+  if ((key === "letterSpacing" || key === "lineHeight") && typeof value === "number") {
+    return { value, unit: "PIXELS" };
+  }
+  return value;
 }
 
 // Build one node and its subtree. Hard failures (bad type, missing parent,
 // uninstantiable component) reject the whole spec; a single rejected property
 // is recorded in `errors` and the node survives with its other props.
-async function createOneNode(spec, fallbackParent, counts) {
+async function createOneNode(spec, fallbackParent, counts, progress) {
   counts.total++;
   if (!spec || typeof spec !== "object" || Array.isArray(spec)) {
     return { ok: false, type: undefined, error: "node spec must be an object" };
@@ -786,13 +833,16 @@ async function createOneNode(spec, fallbackParent, counts) {
   const result = { ok: true, id: node.id, type: node.type, name: node.name };
   if (propErrors.length) result.errors = propErrors;
 
+  // Emit before recursing so each subtree level keeps the inactivity timer alive.
+  await maybeEmitProgress(progress, counts);
+
   if (Array.isArray(spec.children) && spec.children.length) {
     if (!("appendChild" in node)) {
       result.errors = (result.errors || []).concat({ key: "children", error: `${node.type} cannot have children` });
     } else {
       result.children = [];
       for (const child of spec.children) {
-        result.children.push(await createOneNode(child, node, counts));
+        result.children.push(await createOneNode(child, node, counts, progress));
       }
     }
   }
@@ -2117,6 +2167,12 @@ async function applyEditToNode(node, steps, newValue, oldLeaf, path) {
 
 /** Coerce a hex string into a Figma rgb 0-1 color when the target leaf is a color; otherwise pass through. */
 function convertWriteValue(newValue, oldLeaf, key) {
+  // `key` here is the leaf being written; for a whole-property edit of
+  // letterSpacing/lineHeight a bare number is the PIXELS shorthand. A nested
+  // edit (letterSpacing.value) has key="value" and is left alone.
+  if ((key === "letterSpacing" || key === "lineHeight") && typeof newValue === "number") {
+    return { value: newValue, unit: "PIXELS" };
+  }
   if (typeof newValue === "string" && /^#[0-9a-fA-F]{3,8}$/.test(newValue)) {
     const colorLike = key === "color" || (oldLeaf && typeof oldLeaf === "object" && typeof oldLeaf.r === "number");
     if (colorLike) {

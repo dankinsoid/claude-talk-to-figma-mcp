@@ -418,6 +418,15 @@ var Paint = import_zod.z.object({
   opacity: import_zod.z.number().min(0).max(1).optional()
 }).passthrough();
 var FontName = import_zod.z.object({ family: import_zod.z.string(), style: import_zod.z.string().describe('face name, e.g. "Regular", "Bold Italic"') }).describe("font; loaded automatically before write");
+var LetterSpacing = import_zod.z.union([
+  import_zod.z.number(),
+  import_zod.z.object({ value: import_zod.z.number(), unit: import_zod.z.enum(["PIXELS", "PERCENT"]) })
+]);
+var LineHeight = import_zod.z.union([
+  import_zod.z.number(),
+  import_zod.z.object({ value: import_zod.z.number(), unit: import_zod.z.enum(["PIXELS", "PERCENT"]) }),
+  import_zod.z.object({ unit: import_zod.z.literal("AUTO") })
+]);
 var baseFields = {
   name: import_zod.z.string().optional(),
   x: import_zod.z.number().optional().describe("parent-relative x (ignored inside an auto-layout parent)"),
@@ -468,7 +477,8 @@ var textFields = {
   fontSize: import_zod.z.number().positive().optional(),
   textAlignHorizontal: import_zod.z.enum(["LEFT", "CENTER", "RIGHT", "JUSTIFIED"]).optional(),
   textAlignVertical: import_zod.z.enum(["TOP", "CENTER", "BOTTOM"]).optional(),
-  letterSpacing: import_zod.z.number().optional(),
+  letterSpacing: LetterSpacing.optional().describe("number = PIXELS; {value,unit:'PERCENT'} for em-relative"),
+  lineHeight: LineHeight.optional().describe("number = PIXELS; {value,unit:'PERCENT'} or {unit:'AUTO'}"),
   textCase: import_zod.z.enum(["ORIGINAL", "UPPER", "LOWER", "TITLE"]).optional(),
   textDecoration: import_zod.z.enum(["NONE", "UNDERLINE", "STRIKETHROUGH"]).optional()
 };

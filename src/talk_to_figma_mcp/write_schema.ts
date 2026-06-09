@@ -50,6 +50,20 @@ const FontName = z
   .object({ family: z.string(), style: z.string().describe('face name, e.g. "Regular", "Bold Italic"') })
   .describe("font; loaded automatically before write");
 
+// Figma types these as {value, unit} objects, NOT plain numbers — a bare number
+// is accepted as a PIXELS shorthand (coerced plugin-side) so the common case
+// stays terse, but the object form is needed for PERCENT / AUTO.
+const LetterSpacing = z.union([
+  z.number(),
+  z.object({ value: z.number(), unit: z.enum(["PIXELS", "PERCENT"]) }),
+]);
+
+const LineHeight = z.union([
+  z.number(),
+  z.object({ value: z.number(), unit: z.enum(["PIXELS", "PERCENT"]) }),
+  z.object({ unit: z.literal("AUTO") }),
+]);
+
 // ── shared field groups (raw Zod shapes, spread into each type) ────────────
 
 const baseFields = {
@@ -107,7 +121,8 @@ const textFields = {
   fontSize: z.number().positive().optional(),
   textAlignHorizontal: z.enum(["LEFT", "CENTER", "RIGHT", "JUSTIFIED"]).optional(),
   textAlignVertical: z.enum(["TOP", "CENTER", "BOTTOM"]).optional(),
-  letterSpacing: z.number().optional(),
+  letterSpacing: LetterSpacing.optional().describe("number = PIXELS; {value,unit:'PERCENT'} for em-relative"),
+  lineHeight: LineHeight.optional().describe("number = PIXELS; {value,unit:'PERCENT'} or {unit:'AUTO'}"),
   textCase: z.enum(["ORIGINAL", "UPPER", "LOWER", "TITLE"]).optional(),
   textDecoration: z.enum(["NONE", "UNDERLINE", "STRIKETHROUGH"]).optional(),
 };
