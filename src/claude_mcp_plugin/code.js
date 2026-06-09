@@ -812,8 +812,12 @@ function writePropWeight(k) {
   switch (k) {
     case "fontName": return 0;
     case "fontSize": return 1;
-    case "layoutMode": return 2;
-    case "layoutWrap": return 3;
+    // Bind a text style before letterSpacing/lineHeight/characters: it swaps the
+    // node's font to the style's, and those props throw on an unloaded font
+    // (setStyleId loads it for us).
+    case "textStyleId": return 2;
+    case "layoutMode": return 3;
+    case "layoutWrap": return 4;
     case "characters": return 99;
     default: return 50;
   }
@@ -918,6 +922,12 @@ async function setStyleId(node, key, value) {
   const method = STYLE_ID_SETTERS[key];
   if (typeof node[method] !== "function") throw new Error(`${node.type} does not support ${key}`);
   await node[method](value == null ? "" : String(value)); // "" detaches the style
+  // A bound text style swaps the node to the style's font; load it so a later
+  // letterSpacing/lineHeight/characters write in the same batch doesn't throw on
+  // an unloaded font (the setter doesn't load it itself).
+  if (key === "textStyleId" && node.type === "TEXT" && node.fontName && node.fontName !== figma.mixed) {
+    await figma.loadFontAsync(node.fontName);
+  }
 }
 
 // Figma's Effect setters validate per-type, and the STYLE setter (style.effects)
