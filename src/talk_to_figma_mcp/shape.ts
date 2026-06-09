@@ -208,27 +208,29 @@ function autoLayoutOf(node: any, stack: "h" | "v", size: any): any {
 
 /**
  * Mark instances to collapse as repeats: walking in render (pre-)order, the
- * first instance of each component is kept; later instances of an already-seen
- * component are recorded so the render/budget passes treat them as leaves. The
- * requested root is never collapsed. Returns the set of repeat node ids.
+ * first instance of each component is kept as the template; later instances of
+ * an already-seen component are recorded so the render/budget passes treat them
+ * as leaves. The requested root is never collapsed. Returns the set of repeat
+ * node ids plus a componentId -> template componentProperties map, so a
+ * collapsed copy can surface only the props that differ from its template.
  */
-function planRepeats(root: any, enabled: boolean): Set<string> {
+function planRepeats(root: any, enabled: boolean): { collapsed: Set<string>; templates: Map<string, any> } {
   const collapsed = new Set<string>();
-  if (!enabled) return collapsed;
-  const seen = new Set<string>();
+  const templates = new Map<string, any>();
+  if (!enabled) return { collapsed, templates };
   const visit = (node: any, isRoot: boolean) => {
     if (!isRoot && node.type === "INSTANCE" && node.componentId) {
-      if (seen.has(node.componentId)) {
+      if (templates.has(node.componentId)) {
         collapsed.add(node.id);
         return; // a copy of an already-seen component — don't descend
       }
-      seen.add(node.componentId);
+      templates.set(node.componentId, node.componentProperties);
     }
     const kids = node.children;
     if (kids) for (const c of kids) visit(c, false);
   };
   visit(root, true);
-  return collapsed;
+  return { collapsed, templates };
 }
 
 /**
@@ -243,6 +245,22 @@ function compactProps(cp: any): Record<string, any> | undefined {
     const name = key.split("#")[0];
     const v = cp[key];
     o[name] = v && typeof v === "object" && "value" in v ? v.value : v;
+  }
+  return Object.keys(o).length ? o : undefined;
+}
+
+/**
+ * Props of a collapsed repeat relative to its template (the first instance of
+ * the same component): keep only keys whose value differs. With no template, or
+ * when nothing differs, the copy is config-identical and props are dropped.
+ */
+function propsDiff(cp: any, templateCp: any): Record<string, any> | undefined {
+  const cur = compactProps(cp);
+  if (!cur) return undefined;
+  const tmpl = compactProps(templateCp) || {};
+  const o: Record<string, any> = {};
+  for (const k of Object.keys(cur)) {
+    if (JSON.stringify(cur[k]) !== JSON.stringify(tmpl[k])) o[k] = cur[k];
   }
   return Object.keys(o).length ? o : undefined;
 }
@@ -311,7 +329,8 @@ function shapeRec(
   curDepth: number,
   parent: Stack,
   expand: Set<string>,
-  repeats: Set<string>
+  repeats: Set<string>,
+  templates: Map<string, any>
 ): any {
   // Hidden nodes (except the requested root) collapse to a bare presence marker.
   if (curDepth > 0 && node.visible === false) return { id: node.id, hidden: true };
@@ -369,9 +388,9 @@ function shapeRec(
   const kids: any[] = node.children || [];
   if (kids.length) {
     if (isRepeat) {
-      // Repeated instance: surface the config that differentiates this copy
-      // (component properties + any visible text), hide the internals.
-      const props = compactProps(node.componentProperties);
+      // Repeated instance: surface only what differentiates this copy from its
+      // template (props that differ + any visible text), hide the internals.
+      const props = propsDiff(node.componentProperties, templates.get(node.componentId));
       if (props) out.props = props;
       const texts: string[] = [];
       collectText(node, texts, 6);
@@ -382,7 +401,9 @@ function shapeRec(
       // shapeRec handles each child's own state (icon / repeat / full); only
       // budget-truncated children (not in expand) become generic stubs.
       out.children = kids.map((c) =>
-        expand.has(c.id) ? shapeRec(c, opts, curDepth + 1, myStack, expand, repeats) : stubNode(c, opts.collapseIcons)
+        expand.has(c.id)
+          ? shapeRec(c, opts, curDepth + 1, myStack, expand, repeats, templates)
+          : stubNode(c, opts.collapseIcons)
       );
     } else {
       // Node itself reached the budget edge — surface as a stub in place.
@@ -404,7 +425,7 @@ export function shapeNode(node: any, options: ShapeOptions = {}): any {
     collapseIcons: options.collapseIcons ?? true,
     collapseRepeats: options.collapseRepeats ?? true,
   };
-  const repeats = planRepeats(node, opts.collapseRepeats);
-  const expand = planExpansion(node, opts, repeats);
-  return shapeRec(node, opts, 0, null, expand, repeats);
+  const { collapsed, templates } = planRepeats(node, opts.collapseRepeats);
+  const expand = planExpansion(node, opts, collapsed);
+  return shapeRec(node, opts, 0, null, expand, collapsed, templates);
 }
