@@ -618,7 +618,7 @@ server.tool(
 
 server.tool(
   "edit_nodes",
-  "Edit node properties directly in the node model — the write-side twin of query_nodes/get_node_info, an Edit tool for Figma JSON instead of text. Pass `edits`: an array of `{nodeId, path, old?, new}`. `path` addresses one field the same way query_nodes does — dot for objects, `[i]` for an array index (e.g. `name`, `cornerRadius`, `fills[0].color`, `fills[0].opacity`); no `[*]` (a write needs one concrete target). `new` is the value to set: colors as `#RRGGBB` are converted to Figma's rgb 0-1, and whole objects/arrays are allowed (e.g. set `fills[0]` to a full paint). `old` is an OPTIONAL guard, exactly like the old_string in Edit — if given and it doesn't match the current value (colors compared as hex, numbers tolerantly), that one edit is rejected so you never blind-overwrite a stale read. Edits run in order and are INDEPENDENT: one failing — guard mismatch, read-only/derived prop, a type Figma rejects, font not loaded — records its Figma error and the rest still apply. The result lists each edit as `✓ id path: old → new` or `✗ id path: <error>`, so a failure tells you exactly what to fix. One call can touch many nodes (each edit names its own `nodeId`). Note width/height resize and `characters` loads the font. nodeId accepts short ids (n0, ...) or full Figma ids.",
+  "Edit node properties directly in the node model — the write-side twin of query_nodes/get_node_info, an Edit tool for Figma JSON instead of text. Pass `edits`: an array of `{nodeId, path, old?, new}`. `path` addresses one field the same way query_nodes does — dot for objects, `[i]` for an array index (e.g. `name`, `cornerRadius`, `fills[0].color`, `fills[0].opacity`); no `[*]` (a write needs one concrete target). `new` is the value to set: colors as `#RRGGBB` are converted to Figma's rgb 0-1, and whole objects/arrays are allowed (e.g. set `fills[0]` to a full paint). `old` is an OPTIONAL guard, exactly like the old_string in Edit — if given and it doesn't match the current value (colors compared as hex, numbers tolerantly), that one edit is rejected so you never blind-overwrite a stale read. Edits run in order and are INDEPENDENT: one failing — guard mismatch, read-only/derived prop, a type Figma rejects, font not loaded — records its Figma error and the rest still apply. The result lists each edit as `✓ id path: old → new` or `✗ id path: <error>`, so a failure tells you exactly what to fix. One call can touch many nodes (each edit names its own `nodeId`) — this is also how you bulk-replace text across components: one `{nodeId, path:\"characters\", new:\"...\"}` per text node in a single call (the `characters` path loads the node's font for you). Common paths: `name`, `characters`, `x`/`y`, `width`/`height` (resize), `cornerRadius`, `fills[0].color` (#RRGGBB), `opacity`, `layoutMode`, `paddingTop`, `itemSpacing`, `primaryAxisAlignItems`, `layoutSizingHorizontal`. nodeId accepts short ids (n0, ...) or full Figma ids.",
   {
     edits: z
       .array(
@@ -1142,41 +1142,6 @@ server.tool(
   }
 );
 
-// Move Node Tool
-server.tool(
-  "move_node",
-  "Move a node to a new position in Figma",
-  {
-    nodeId: z.string().describe("The ID of the node to move"),
-    x: z.number().describe("New X position"),
-    y: z.number().describe("New Y position"),
-  },
-  async ({ nodeId, x, y }: any) => {
-    try {
-      const result = await sendCommandToFigma("move_node", { nodeId, x, y });
-      const typedResult = result as { name: string };
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Moved node "${typedResult.name}" to position (${x}, ${y})`,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error moving node: ${error instanceof Error ? error.message : String(error)
-              }`,
-          },
-        ],
-      };
-    }
-  }
-);
-
 // Clone Node Tool
 server.tool(
   "clone_node",
@@ -1206,45 +1171,6 @@ server.tool(
             text: `Error cloning node: ${error instanceof Error ? error.message : String(error)}`
           }
         ]
-      };
-    }
-  }
-);
-
-// Resize Node Tool
-server.tool(
-  "resize_node",
-  "Resize a node in Figma",
-  {
-    nodeId: z.string().describe("The ID of the node to resize"),
-    width: z.number().positive().describe("New width"),
-    height: z.number().positive().describe("New height"),
-  },
-  async ({ nodeId, width, height }: any) => {
-    try {
-      const result = await sendCommandToFigma("resize_node", {
-        nodeId,
-        width,
-        height,
-      });
-      const typedResult = result as { name: string };
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Resized node "${typedResult.name}" to width ${width} and height ${height}`,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error resizing node: ${error instanceof Error ? error.message : String(error)
-              }`,
-          },
-        ],
       };
     }
   }
@@ -1359,43 +1285,6 @@ server.tool(
           {
             type: "text",
             text: `Error exporting node as image: ${error instanceof Error ? error.message : String(error)
-              }`,
-          },
-        ],
-      };
-    }
-  }
-);
-
-// Set Text Content Tool
-server.tool(
-  "set_text_content",
-  "Set the text content of an existing text node in Figma",
-  {
-    nodeId: z.string().describe("The ID of the text node to modify"),
-    text: z.string().describe("New text content"),
-  },
-  async ({ nodeId, text }: any) => {
-    try {
-      const result = await sendCommandToFigma("set_text_content", {
-        nodeId,
-        text,
-      });
-      const typedResult = result as { name: string };
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Updated text content of node "${typedResult.name}" to "${text}"`,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error setting text content: ${error instanceof Error ? error.message : String(error)
               }`,
           },
         ],
@@ -1782,51 +1671,6 @@ server.tool(
 );
 
 
-// Set Corner Radius Tool
-server.tool(
-  "set_corner_radius",
-  "Set the corner radius of a node in Figma",
-  {
-    nodeId: z.string().describe("The ID of the node to modify"),
-    radius: z.number().min(0).describe("Corner radius value"),
-    corners: z
-      .array(z.boolean())
-      .length(4)
-      .optional()
-      .describe(
-        "Optional array of 4 booleans to specify which corners to round [topLeft, topRight, bottomRight, bottomLeft]"
-      ),
-  },
-  async ({ nodeId, radius, corners }: any) => {
-    try {
-      const result = await sendCommandToFigma("set_corner_radius", {
-        nodeId,
-        radius,
-        corners: corners || [true, true, true, true],
-      });
-      const typedResult = result as { name: string };
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Set corner radius of node "${typedResult.name}" to ${radius}px`,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error setting corner radius: ${error instanceof Error ? error.message : String(error)
-              }`,
-          },
-        ],
-      };
-    }
-  }
-);
-
 // Define design strategy prompt
 server.prompt(
   "design_strategy",
@@ -1873,7 +1717,7 @@ server.prompt(
      * Set proper fontWeight for different text elements
 
 6. Mofifying existing elements:
-  - use set_text_content() to modify text content.
+  - use edit_nodes() to modify properties (text via the "characters" path, colors, layout, etc.).
 
 7. Visual Hierarchy:
    - Position elements in logical reading order (top to bottom)
@@ -1986,14 +1830,13 @@ grep_nodes({ root: "node-id", pattern: "..." })  // or find text nodes by conten
 // Clone the node to create a safe copy
 clone_node(nodeId: "selected-node-id", x: [new-x], y: [new-y])
 
-// Replace text chunk by chunk
-set_multiple_text_contents(
-  nodeId: "parent-node-id", 
-  text: [
-    { nodeId: "node-id-1", text: "New text 1" },
+// Replace text chunk by chunk — one edit per text node, "characters" path loads the font
+edit_nodes({
+  edits: [
+    { nodeId: "node-id-1", path: "characters", new: "New text 1" },
     // More nodes in this chunk...
   ]
-)
+})
 
 // Verify chunk with small, targeted image exports
 export_node_as_image(nodeId: "chunk-node-id", format: "PNG", scale: 0.5)
@@ -2071,115 +1914,6 @@ Remember that text is never just text—it's a core design element that must wor
       ],
       description: "Systematic approach for replacing text in Figma designs",
     };
-  }
-);
-
-// Set Multiple Text Contents Tool
-server.tool(
-  "set_multiple_text_contents",
-  "Set multiple text contents parallelly in a node",
-  {
-    nodeId: z
-      .string()
-      .describe("The ID of the node containing the text nodes to replace"),
-    text: z
-      .array(
-        z.object({
-          nodeId: z.string().describe("The ID of the text node"),
-          text: z.string().describe("The replacement text"),
-        })
-      )
-      .describe("Array of text node IDs and their replacement texts"),
-  },
-  async ({ nodeId, text }: any) => {
-    try {
-      if (!text || text.length === 0) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "No text provided",
-            },
-          ],
-        };
-      }
-
-      // Initial response to indicate we're starting the process
-      const initialStatus = {
-        type: "text" as const,
-        text: `Starting text replacement for ${text.length} nodes. This will be processed in batches of 5...`,
-      };
-
-      // Track overall progress
-      let totalProcessed = 0;
-      const totalToProcess = text.length;
-
-      // Use the plugin's set_multiple_text_contents function with chunking
-      const result = await sendCommandToFigma("set_multiple_text_contents", {
-        nodeId,
-        text,
-      });
-
-      // Cast the result to a specific type to work with it safely
-      interface TextReplaceResult {
-        success: boolean;
-        nodeId: string;
-        replacementsApplied?: number;
-        replacementsFailed?: number;
-        totalReplacements?: number;
-        completedInChunks?: number;
-        results?: Array<{
-          success: boolean;
-          nodeId: string;
-          error?: string;
-          originalText?: string;
-          translatedText?: string;
-        }>;
-      }
-
-      const typedResult = result as TextReplaceResult;
-
-      // Format the results for display
-      const success = typedResult.replacementsApplied && typedResult.replacementsApplied > 0;
-      const progressText = `
-      Text replacement completed:
-      - ${typedResult.replacementsApplied || 0} of ${totalToProcess} successfully updated
-      - ${typedResult.replacementsFailed || 0} failed
-      - Processed in ${typedResult.completedInChunks || 1} batches
-      `;
-
-      // Detailed results
-      const detailedResults = typedResult.results || [];
-      const failedResults = detailedResults.filter(item => !item.success);
-
-      // Create the detailed part of the response
-      let detailedResponse = "";
-      if (failedResults.length > 0) {
-        detailedResponse = `\n\nNodes that failed:\n${failedResults.map(item =>
-          `- ${item.nodeId}: ${item.error || "Unknown error"}`
-        ).join('\n')}`;
-      }
-
-      return {
-        content: [
-          initialStatus,
-          {
-            type: "text" as const,
-            text: progressText + detailedResponse,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error setting multiple text contents: ${error instanceof Error ? error.message : String(error)
-              }`,
-          },
-        ],
-      };
-    }
   }
 );
 
@@ -2392,249 +2126,6 @@ This strategy enables transferring content and property overrides from a source 
       ],
       description: "Strategy for transferring overrides between component instances in Figma",
     };
-  }
-);
-
-// Set Layout Mode Tool
-server.tool(
-  "set_layout_mode",
-  "Set the layout mode and wrap behavior of a frame in Figma",
-  {
-    nodeId: z.string().describe("The ID of the frame to modify"),
-    layoutMode: z.enum(["NONE", "HORIZONTAL", "VERTICAL"]).describe("Layout mode for the frame"),
-    layoutWrap: z.enum(["NO_WRAP", "WRAP"]).optional().describe("Whether the auto-layout frame wraps its children")
-  },
-  async ({ nodeId, layoutMode, layoutWrap }: any) => {
-    try {
-      const result = await sendCommandToFigma("set_layout_mode", {
-        nodeId,
-        layoutMode,
-        layoutWrap: layoutWrap || "NO_WRAP"
-      });
-      const typedResult = result as { name: string };
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Set layout mode of frame "${typedResult.name}" to ${layoutMode}${layoutWrap ? ` with ${layoutWrap}` : ''}`,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error setting layout mode: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-      };
-    }
-  }
-);
-
-// Set Padding Tool
-server.tool(
-  "set_padding",
-  "Set padding values for an auto-layout frame in Figma",
-  {
-    nodeId: z.string().describe("The ID of the frame to modify"),
-    paddingTop: z.number().optional().describe("Top padding value"),
-    paddingRight: z.number().optional().describe("Right padding value"),
-    paddingBottom: z.number().optional().describe("Bottom padding value"),
-    paddingLeft: z.number().optional().describe("Left padding value"),
-  },
-  async ({ nodeId, paddingTop, paddingRight, paddingBottom, paddingLeft }: any) => {
-    try {
-      const result = await sendCommandToFigma("set_padding", {
-        nodeId,
-        paddingTop,
-        paddingRight,
-        paddingBottom,
-        paddingLeft,
-      });
-      const typedResult = result as { name: string };
-
-      // Create a message about which padding values were set
-      const paddingMessages = [];
-      if (paddingTop !== undefined) paddingMessages.push(`top: ${paddingTop}`);
-      if (paddingRight !== undefined) paddingMessages.push(`right: ${paddingRight}`);
-      if (paddingBottom !== undefined) paddingMessages.push(`bottom: ${paddingBottom}`);
-      if (paddingLeft !== undefined) paddingMessages.push(`left: ${paddingLeft}`);
-
-      const paddingText = paddingMessages.length > 0
-        ? `padding (${paddingMessages.join(', ')})`
-        : "padding";
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Set ${paddingText} for frame "${typedResult.name}"`,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error setting padding: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-      };
-    }
-  }
-);
-
-// Set Axis Align Tool
-server.tool(
-  "set_axis_align",
-  "Set primary and counter axis alignment for an auto-layout frame in Figma",
-  {
-    nodeId: z.string().describe("The ID of the frame to modify"),
-    primaryAxisAlignItems: z
-      .enum(["MIN", "MAX", "CENTER", "SPACE_BETWEEN"])
-      .optional()
-      .describe("Primary axis alignment (MIN/MAX = left/right in horizontal, top/bottom in vertical). Note: When set to SPACE_BETWEEN, itemSpacing will be ignored as children will be evenly spaced."),
-    counterAxisAlignItems: z
-      .enum(["MIN", "MAX", "CENTER", "BASELINE"])
-      .optional()
-      .describe("Counter axis alignment (MIN/MAX = top/bottom in horizontal, left/right in vertical)")
-  },
-  async ({ nodeId, primaryAxisAlignItems, counterAxisAlignItems }: any) => {
-    try {
-      const result = await sendCommandToFigma("set_axis_align", {
-        nodeId,
-        primaryAxisAlignItems,
-        counterAxisAlignItems
-      });
-      const typedResult = result as { name: string };
-
-      // Create a message about which alignments were set
-      const alignMessages = [];
-      if (primaryAxisAlignItems !== undefined) alignMessages.push(`primary: ${primaryAxisAlignItems}`);
-      if (counterAxisAlignItems !== undefined) alignMessages.push(`counter: ${counterAxisAlignItems}`);
-
-      const alignText = alignMessages.length > 0
-        ? `axis alignment (${alignMessages.join(', ')})`
-        : "axis alignment";
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Set ${alignText} for frame "${typedResult.name}"`,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error setting axis alignment: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-      };
-    }
-  }
-);
-
-// Set Layout Sizing Tool
-server.tool(
-  "set_layout_sizing",
-  "Set horizontal and vertical sizing modes for an auto-layout frame in Figma",
-  {
-    nodeId: z.string().describe("The ID of the frame to modify"),
-    layoutSizingHorizontal: z
-      .enum(["FIXED", "HUG", "FILL"])
-      .optional()
-      .describe("Horizontal sizing mode (HUG for frames/text only, FILL for auto-layout children only)"),
-    layoutSizingVertical: z
-      .enum(["FIXED", "HUG", "FILL"])
-      .optional()
-      .describe("Vertical sizing mode (HUG for frames/text only, FILL for auto-layout children only)")
-  },
-  async ({ nodeId, layoutSizingHorizontal, layoutSizingVertical }: any) => {
-    try {
-      const result = await sendCommandToFigma("set_layout_sizing", {
-        nodeId,
-        layoutSizingHorizontal,
-        layoutSizingVertical
-      });
-      const typedResult = result as { name: string };
-
-      // Create a message about which sizing modes were set
-      const sizingMessages = [];
-      if (layoutSizingHorizontal !== undefined) sizingMessages.push(`horizontal: ${layoutSizingHorizontal}`);
-      if (layoutSizingVertical !== undefined) sizingMessages.push(`vertical: ${layoutSizingVertical}`);
-
-      const sizingText = sizingMessages.length > 0
-        ? `layout sizing (${sizingMessages.join(', ')})`
-        : "layout sizing";
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Set ${sizingText} for frame "${typedResult.name}"`,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error setting layout sizing: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-      };
-    }
-  }
-);
-
-// Set Item Spacing Tool
-server.tool(
-  "set_item_spacing",
-  "Set distance between children in an auto-layout frame",
-  {
-    nodeId: z.string().describe("The ID of the frame to modify"),
-    itemSpacing: z.number().optional().describe("Distance between children. Note: This value will be ignored if primaryAxisAlignItems is set to SPACE_BETWEEN."),
-    counterAxisSpacing: z.number().optional().describe("Distance between wrapped rows/columns. Only works when layoutWrap is set to WRAP.")
-  },
-  async ({ nodeId, itemSpacing, counterAxisSpacing}: any) => {
-    try {
-      const params: any = { nodeId };
-      if (itemSpacing !== undefined) params.itemSpacing = itemSpacing;
-      if (counterAxisSpacing !== undefined) params.counterAxisSpacing = counterAxisSpacing;
-      
-      const result = await sendCommandToFigma("set_item_spacing", params);
-      const typedResult = result as { name: string, itemSpacing?: number, counterAxisSpacing?: number };
-
-      let message = `Updated spacing for frame "${typedResult.name}":`;
-      if (itemSpacing !== undefined) message += ` itemSpacing=${itemSpacing}`;
-      if (counterAxisSpacing !== undefined) message += ` counterAxisSpacing=${counterAxisSpacing}`;
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: message,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error setting spacing: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-      };
-    }
   }
 );
 
@@ -2921,8 +2412,6 @@ type FigmaCommand =
   | "create_text"
   | "set_fill_color"
   | "set_stroke_color"
-  | "move_node"
-  | "resize_node"
   | "delete_node"
   | "delete_multiple_nodes"
   | "get_styles"
@@ -2932,10 +2421,7 @@ type FigmaCommand =
   | "set_instance_overrides"
   | "export_node_as_image"
   | "join"
-  | "set_corner_radius"
   | "clone_node"
-  | "set_text_content"
-  | "set_multiple_text_contents"
   | "get_annotations"
   | "set_annotation"
   | "set_multiple_annotations"
@@ -2943,11 +2429,6 @@ type FigmaCommand =
   | "grep_nodes"
   | "query_nodes"
   | "edit_nodes"
-  | "set_layout_mode"
-  | "set_padding"
-  | "set_axis_align"
-  | "set_layout_sizing"
-  | "set_item_spacing"
   | "get_reactions"
   | "set_default_connector"
   | "create_connections"
@@ -3004,16 +2485,6 @@ type CommandParams = {
     a?: number;
     weight?: number;
   };
-  move_node: {
-    nodeId: string;
-    x: number;
-    y: number;
-  };
-  resize_node: {
-    nodeId: string;
-    width: number;
-    height: number;
-  };
   delete_node: {
     nodeId: string;
   };
@@ -3046,23 +2517,10 @@ type CommandParams = {
   join: {
     channel: string;
   };
-  set_corner_radius: {
-    nodeId: string;
-    radius: number;
-    corners?: boolean[];
-  };
   clone_node: {
     nodeId: string;
     x?: number;
     y?: number;
-  };
-  set_text_content: {
-    nodeId: string;
-    text: string;
-  };
-  set_multiple_text_contents: {
-    nodeId: string;
-    text: Array<{ nodeId: string; text: string }>;
   };
   get_annotations: {
     nodeId?: string;
