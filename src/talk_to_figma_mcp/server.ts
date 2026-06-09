@@ -1755,6 +1755,42 @@ server.tool(
   }
 );
 
+// Group / ungroup nodes
+server.tool(
+  "edit_groups",
+  "Group or ungroup nodes. `group` wraps 2+ nodes in a new GROUP (placed in the first node's current parent unless `parentId` is given). `ungroup` dissolves each GROUP/FRAME in `nodeIds` back into its parent and returns the freed children with their new IDs (ungroup reparents, so IDs change). A GROUP is a lightweight container with no layout/clipping of its own — use a FRAME (via write_nodes) when you need auto-layout, padding, or clipping.",
+  {
+    operation: z.enum(["group", "ungroup"]).describe("`group` to wrap nodes, `ungroup` to dissolve containers"),
+    nodeIds: z
+      .array(z.string())
+      .min(1)
+      .describe("For `group`: the 2+ nodes to wrap. For `ungroup`: the GROUP/FRAME nodes to dissolve."),
+    name: z.string().optional().describe("Name for the new group (group only)"),
+    parentId: z.string().optional().describe("Parent to place the group in; defaults to the first node's parent (group only)"),
+  },
+  async ({ operation, nodeIds, name, parentId }: any) => {
+    try {
+      const result: any = await sendCommandToFigma("edit_groups", { operation, nodeIds, name, parentId });
+      const text =
+        operation === "group"
+          ? `Grouped ${result.childCount} nodes into "${result.name}" (ID: ${result.id}).`
+          : `Ungrouped ${nodeIds.length} container(s) into ${result.childCount} nodes: ${result.children
+              .map((c: any) => `${c.name} (${c.id})`)
+              .join(", ")}.`;
+      return { content: [{ type: "text", text }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error editing groups: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
 // ---- Variables / design tokens ----
 
 server.tool(
@@ -2000,6 +2036,7 @@ type FigmaCommand =
   | "set_selections"
   | "combine_as_variants"
   | "boolean_operation"
+  | "edit_groups"
   | "get_variables"
   | "set_variables"
   | "bind_variables";
@@ -2109,6 +2146,12 @@ type CommandParams = {
   };
   boolean_operation: {
     operation: "union" | "subtract" | "intersect" | "exclude";
+    nodeIds: string[];
+    name?: string;
+    parentId?: string;
+  };
+  edit_groups: {
+    operation: "group" | "ungroup";
     nodeIds: string[];
     name?: string;
     parentId?: string;

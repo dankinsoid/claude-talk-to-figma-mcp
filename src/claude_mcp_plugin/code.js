@@ -268,6 +268,8 @@ async function handleCommand(command, params) {
       return await combineAsVariants(params);
     case "boolean_operation":
       return await booleanOperation(params);
+    case "edit_groups":
+      return await editGroups(params);
     case "get_variables":
       return await getVariables(params);
     case "set_variables":
@@ -3269,6 +3271,67 @@ async function booleanOperation(params) {
     booleanOperation: result.booleanOperation,
     childCount: result.children.length,
   };
+}
+
+// Group/ungroup, the inverse halves of one operation.
+// - group: wrap 2+ nodes in a GROUP. figma.group reparents them (they must share
+//   a reachable scene), so parent defaults to the first node's current parent
+//   rather than the page — grouping siblings shouldn't yank them to the root.
+// - ungroup: dissolve each GROUP/FRAME back into its parent. figma.ungroup
+//   returns the freed children with fresh ids (they're reparented), so echo the
+//   new ids for the agent to keep operating on them.
+async function editGroups(params) {
+  const { operation, nodeIds, name, parentId } = params || {};
+  if (!Array.isArray(nodeIds) || nodeIds.length === 0) {
+    throw new Error("edit_groups requires a non-empty `nodeIds` array");
+  }
+
+  const nodes = [];
+  for (const id of nodeIds) {
+    const node = await figma.getNodeByIdAsync(id);
+    if (!node) throw new Error(`Node not found: ${id}`);
+    nodes.push(node);
+  }
+
+  if (operation === "ungroup") {
+    const freed = [];
+    for (const node of nodes) {
+      if (typeof node.children === "undefined") {
+        throw new Error(`Node ${node.id} is ${node.type}; ungroup only accepts container nodes (GROUP/FRAME)`);
+      }
+      // figma.ungroup throws if the node has no parent (e.g. already detached).
+      for (const c of figma.ungroup(node)) {
+        freed.push({ id: c.id, name: c.name, type: c.type });
+      }
+    }
+    return { success: true, operation, childCount: freed.length, children: freed };
+  }
+
+  if (operation === "group") {
+    if (nodes.length < 2) {
+      throw new Error("group requires at least 2 node ids");
+    }
+    let parent;
+    if (parentId) {
+      parent = await figma.getNodeByIdAsync(parentId);
+      if (!parent) throw new Error(`Parent not found: ${parentId}`);
+    } else {
+      parent = nodes[0].parent || figma.currentPage;
+    }
+    // Throws if nodes can't be grouped (e.g. mixed pages, parent can't host).
+    const group = figma.group(nodes, parent);
+    if (typeof name === "string" && name) group.name = name;
+    return {
+      success: true,
+      operation,
+      id: group.id,
+      name: group.name,
+      type: group.type,
+      childCount: group.children.length,
+    };
+  }
+
+  throw new Error("edit_groups requires `operation` one of: group, ungroup");
 }
 
 // ---- Variables / design tokens ----

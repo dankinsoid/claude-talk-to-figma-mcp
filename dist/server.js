@@ -2537,6 +2537,32 @@ server.tool(
   }
 );
 server.tool(
+  "edit_groups",
+  "Group or ungroup nodes. `group` wraps 2+ nodes in a new GROUP (placed in the first node's current parent unless `parentId` is given). `ungroup` dissolves each GROUP/FRAME in `nodeIds` back into its parent and returns the freed children with their new IDs (ungroup reparents, so IDs change). A GROUP is a lightweight container with no layout/clipping of its own \u2014 use a FRAME (via write_nodes) when you need auto-layout, padding, or clipping.",
+  {
+    operation: z4.enum(["group", "ungroup"]).describe("`group` to wrap nodes, `ungroup` to dissolve containers"),
+    nodeIds: z4.array(z4.string()).min(1).describe("For `group`: the 2+ nodes to wrap. For `ungroup`: the GROUP/FRAME nodes to dissolve."),
+    name: z4.string().optional().describe("Name for the new group (group only)"),
+    parentId: z4.string().optional().describe("Parent to place the group in; defaults to the first node's parent (group only)")
+  },
+  async ({ operation, nodeIds, name, parentId: parentId2 }) => {
+    try {
+      const result = await sendCommandToFigma("edit_groups", { operation, nodeIds, name, parentId: parentId2 });
+      const text = operation === "group" ? `Grouped ${result.childCount} nodes into "${result.name}" (ID: ${result.id}).` : `Ungrouped ${nodeIds.length} container(s) into ${result.childCount} nodes: ${result.children.map((c) => `${c.name} (${c.id})`).join(", ")}.`;
+      return { content: [{ type: "text", text }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error editing groups: ${error instanceof Error ? error.message : String(error)}`
+          }
+        ]
+      };
+    }
+  }
+);
+server.tool(
   "get_variables",
   "Read local Figma variables (design tokens): every variable collection, its modes, and each variable's per-mode value. Colors come back as hex, and aliases (variables referencing other variables) resolve to {alias: <target name>, aliasId}. Use this to discover token names/ids before binding or updating them. Pass `collection` to filter to one collection by name or id.",
   {
