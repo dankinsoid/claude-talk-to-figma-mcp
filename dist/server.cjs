@@ -2491,6 +2491,41 @@ server.tool(
     }
   }
 );
+server.tool(
+  "combine_as_variants",
+  'Combine 2+ standalone COMPONENT nodes into a single COMPONENT_SET (variants). Figma derives variant properties from each component\'s name in "Prop=Value, Prop2=Value2" form, so pass `rename` to set those names atomically before merging (e.g. State=Default, State=Hover). All components must be on the same page.',
+  {
+    nodeIds: import_zod4.z.array(import_zod4.z.string()).min(2).describe("IDs of the COMPONENT nodes to combine (at least 2, same page)"),
+    name: import_zod4.z.string().optional().describe("Name for the resulting component set"),
+    parentId: import_zod4.z.string().optional().describe("Parent node to place the set in (defaults to current page)"),
+    rename: import_zod4.z.array(import_zod4.z.object({ nodeId: import_zod4.z.string(), name: import_zod4.z.string() })).optional().describe('Rename components before combining, to set variant props via "Prop=Value" naming')
+  },
+  async ({ nodeIds, name, parentId: parentId2, rename }) => {
+    try {
+      const result = await sendCommandToFigma("combine_as_variants", { nodeIds, name, parentId: parentId2, rename });
+      const props = result.variantProperties ? Object.entries(result.variantProperties).map(([k, v]) => `${k}: [${(v?.values || []).join(", ")}]`).join("; ") : "none";
+      const warn = result.variantWarning ? `
+\u26A0\uFE0F ${result.variantWarning}` : "";
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Created component set "${result.name}" (ID: ${result.id}) with ${result.childCount} variants. Properties: ${props}${warn}`
+          }
+        ]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error combining as variants: ${error instanceof Error ? error.message : String(error)}`
+          }
+        ]
+      };
+    }
+  }
+);
 server.prompt(
   "reaction_to_connector_strategy",
   "Strategy for converting Figma prototype reactions to connector lines using the output of 'get_reactions'",

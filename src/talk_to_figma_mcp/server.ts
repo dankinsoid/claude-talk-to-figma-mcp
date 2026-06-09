@@ -1673,6 +1673,49 @@ server.tool(
   }
 );
 
+// Combine standalone components into a variant set (COMPONENT_SET)
+server.tool(
+  "combine_as_variants",
+  "Combine 2+ standalone COMPONENT nodes into a single COMPONENT_SET (variants). Figma derives variant properties from each component's name in \"Prop=Value, Prop2=Value2\" form, so pass `rename` to set those names atomically before merging (e.g. State=Default, State=Hover). All components must be on the same page.",
+  {
+    nodeIds: z.array(z.string()).min(2).describe("IDs of the COMPONENT nodes to combine (at least 2, same page)"),
+    name: z.string().optional().describe("Name for the resulting component set"),
+    parentId: z.string().optional().describe("Parent node to place the set in (defaults to current page)"),
+    rename: z
+      .array(z.object({ nodeId: z.string(), name: z.string() }))
+      .optional()
+      .describe("Rename components before combining, to set variant props via \"Prop=Value\" naming"),
+  },
+  async ({ nodeIds, name, parentId, rename }: any) => {
+    try {
+      const result: any = await sendCommandToFigma("combine_as_variants", { nodeIds, name, parentId, rename });
+      const props = result.variantProperties
+        ? Object.entries(result.variantProperties)
+            .map(([k, v]: any) => `${k}: [${(v?.values || []).join(", ")}]`)
+            .join("; ")
+        : "none";
+      const warn = result.variantWarning ? `\n⚠️ ${result.variantWarning}` : "";
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Created component set "${result.name}" (ID: ${result.id}) with ${result.childCount} variants. Properties: ${props}${warn}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error combining as variants: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
 // Strategy for converting Figma prototype reactions to connector lines
 server.prompt(
   "reaction_to_connector_strategy",
@@ -1782,7 +1825,8 @@ type FigmaCommand =
   | "set_default_connector"
   | "create_connections"
   | "set_focus"
-  | "set_selections";
+  | "set_selections"
+  | "combine_as_variants";
 
 type CommandParams = {
   get_selection: Record<string, never>;
@@ -1880,6 +1924,12 @@ type CommandParams = {
   };
   set_selections: {
     nodeIds: string[];
+  };
+  combine_as_variants: {
+    nodeIds: string[];
+    name?: string;
+    parentId?: string;
+    rename?: Array<{ nodeId: string; name: string }>;
   };
 
 };

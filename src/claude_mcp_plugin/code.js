@@ -264,6 +264,8 @@ async function handleCommand(command, params) {
       return await setFocus(params);
     case "set_selections":
       return await setSelections(params);
+    case "combine_as_variants":
+      return await combineAsVariants(params);
     default:
       throw new Error(`Unknown command: ${command}`);
   }
@@ -3150,5 +3152,65 @@ async function setSelections(params) {
     selectedNodes: selectedNodes,
     notFoundIds: notFoundIds,
     message: `Selected ${nodes.length} nodes${notFoundIds.length > 0 ? ` (${notFoundIds.length} not found)` : ''}`
+  };
+}
+
+// Combine standalone COMPONENT nodes into one COMPONENT_SET (variants).
+// Figma derives variant properties from each component's name in
+// "Prop=Value, Prop2=Value2" form, so callers usually pass `rename` to set
+// those names atomically before the merge.
+async function combineAsVariants(params) {
+  const { nodeIds, name, parentId, rename } = params || {};
+  if (!Array.isArray(nodeIds) || nodeIds.length < 2) {
+    throw new Error("combine_as_variants requires `nodeIds` with at least 2 component ids");
+  }
+
+  // Rename pass first: combineAsVariants reads names to infer variant props.
+  if (Array.isArray(rename)) {
+    for (const r of rename) {
+      if (!r || !r.nodeId || typeof r.name !== "string") continue;
+      const n = await figma.getNodeByIdAsync(r.nodeId);
+      if (n) n.name = r.name;
+    }
+  }
+
+  const nodes = [];
+  for (const id of nodeIds) {
+    const node = await figma.getNodeByIdAsync(id);
+    if (!node) throw new Error(`Node not found: ${id}`);
+    if (node.type !== "COMPONENT") {
+      throw new Error(`Node ${id} is ${node.type}; combine_as_variants only accepts COMPONENT nodes`);
+    }
+    nodes.push(node);
+  }
+
+  let parent = figma.currentPage;
+  if (parentId) {
+    parent = await figma.getNodeByIdAsync(parentId);
+    if (!parent) throw new Error(`Parent not found: ${parentId}`);
+  }
+
+  // Throws if the components live on different pages or names collide.
+  const set = figma.combineAsVariants(nodes, parent);
+  if (typeof name === "string" && name) set.name = name;
+
+  // variantGroupProperties throws when names aren't valid Prop=Value pairs;
+  // surface the warning rather than failing the whole op.
+  let variantProperties = null;
+  let variantWarning = undefined;
+  try {
+    variantProperties = set.variantGroupProperties;
+  } catch (e) {
+    variantWarning = `Component names are not valid "Prop=Value" variants: ${e instanceof Error ? e.message : String(e)}`;
+  }
+
+  return {
+    success: true,
+    id: set.id,
+    name: set.name,
+    type: set.type,
+    childCount: set.children.length,
+    variantProperties,
+    variantWarning,
   };
 }
