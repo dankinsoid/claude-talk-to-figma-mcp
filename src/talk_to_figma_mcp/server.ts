@@ -10,6 +10,7 @@ import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { shapeNode } from "./shape.js";
 import { renumberIds, resolveShortIdsInParams } from "./idmap.js";
+import { writeNodeUnion, describeNodeSchema, listNodeTypes, NODE_TYPES, type NodeType } from "./write_schema.js";
 
 // Define TypeScript interfaces for Figma responses
 interface FigmaResponse {
@@ -659,9 +660,27 @@ server.tool(
   },
   async ({ nodes }: any) => {
     try {
-      const result: any = await sendCommandToFigma("write_nodes", { nodes });
+      // Validate each root spec against the write schema BEFORE the plugin round-trip,
+      // so a shape/enum mistake fails here with a precise field path instead of
+      // silently no-opping in Figma. Per-root (not whole-batch) keeps write_nodes'
+      // independence guarantee — one bad root is rejected, valid siblings still create.
+      const valid: any[] = [];
+      const rejected: string[] = [];
+      for (const spec of nodes as any[]) {
+        const parsed = writeNodeUnion.safeParse(spec);
+        if (parsed.success) {
+          valid.push(spec);
+        } else {
+          const where = spec && typeof spec === "object" ? String(spec.type || "node") : "node";
+          for (const iss of (parsed as z.SafeParseError<any>).error.issues) {
+            rejected.push(`✗ ${where}: ${iss.path.join(".") || "(root)"}: ${iss.message}`);
+          }
+        }
+      }
+
+      const result: any = valid.length ? await sendCommandToFigma("write_nodes", { nodes: valid }) : { created: 0, total: 0, results: [] };
       const renumber = (id: string) => renumberIds({ id }).id;
-      const lines: string[] = [];
+      const lines: string[] = [...rejected];
       const walk = (arr: any[], depth: number) => {
         for (const r of arr || []) {
           const pad = "  ".repeat(depth);
@@ -675,7 +694,7 @@ server.tool(
         }
       };
       walk(result?.results || [], 0);
-      const text = `created ${result?.created || 0}/${result?.total || 0}` + (lines.length ? "\n" + lines.join("\n") : "");
+      const text = `created ${result?.created || 0}/${nodes.length}` + (lines.length ? "\n" + lines.join("\n") : "");
       return { content: [{ type: "text", text }] };
     } catch (error) {
       return {
@@ -692,6 +711,23 @@ server.tool(
 
 // Fill/stroke colors are set via edit_nodes — e.g. {path:"fills",new:[{type:"SOLID",color:"#3366ff"}]}
 // or {path:"strokes",...} + {path:"strokeWeight",...}. No dedicated tools.
+
+// Write Schema Tool — lazy, on-demand contract for write_nodes.
+// @ai-generated(guided)
+server.tool(
+  "get_write_schema",
+  "Get the WRITE-side schema for a node type — the fields write_nodes accepts when CREATING that type (not the REST shape read_node returns). Call with `type` (e.g. \"TEXT\") right before building a node to see its fields, valid enum values, and ranges; call with no `type` to list the creatable types. This is the same schema write_nodes validates against, so what it shows is exactly what is accepted. Note: write_nodes also passes through any other Figma property for the type, so the list is the curated common set, not an exhaustive cap.",
+  {
+    type: z
+      .enum(NODE_TYPES)
+      .optional()
+      .describe("Node type to describe (FRAME, TEXT, ...). Omit to list all creatable types."),
+  },
+  async ({ type }: { type?: NodeType }) => {
+    const text = type ? describeNodeSchema(type) : listNodeTypes();
+    return { content: [{ type: "text", text }] };
+  }
+);
 
 // Clone Node Tool
 server.tool(
