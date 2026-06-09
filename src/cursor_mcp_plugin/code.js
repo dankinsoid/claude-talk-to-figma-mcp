@@ -141,16 +141,16 @@ async function handleCommand(command, params) {
       return await getDocumentInfo();
     case "get_selection":
       return await getSelection();
-    case "get_node_info":
+    case "read_node":
       if (!params || !params.nodeId) {
         throw new Error("Missing nodeId parameter");
       }
-      return await getNodeInfo(params.nodeId);
-    case "get_node_info_raw":
+      return await readNode(params.nodeId);
+    case "read_node_raw":
       if (!params || !params.nodeId) {
         throw new Error("Missing nodeId parameter");
       }
-      return await getNodeInfoRaw(params.nodeId);
+      return await readNodeRaw(params.nodeId);
     case "write_nodes":
       return await writeNodes(params);
     case "edit_nodes":
@@ -463,7 +463,7 @@ function filterFigmaNode(node) {
   return filtered;
 }
 
-async function getNodeInfo(nodeId) {
+async function readNode(nodeId) {
   const node = await figma.getNodeByIdAsync(nodeId);
 
   if (!node) {
@@ -479,7 +479,7 @@ async function getNodeInfo(nodeId) {
 
 // Full, unfiltered JSON_REST_V1 serialization of a single node, with the
 // children array stripped so the caller gets every property of just that node.
-async function getNodeInfoRaw(nodeId) {
+async function readNodeRaw(nodeId) {
   const node = await figma.getNodeByIdAsync(nodeId);
 
   if (!node) {

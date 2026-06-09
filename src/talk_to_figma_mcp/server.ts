@@ -295,7 +295,7 @@ server.tool(
         const nodes = await Promise.all(
           ids.map(async (nodeId) => ({
             requestedId: nodeId,
-            node: await sendCommandToFigma("get_node_info_raw", { nodeId }),
+            node: await sendCommandToFigma("read_node_raw", { nodeId }),
           }))
         );
         return {
@@ -305,7 +305,7 @@ server.tool(
 
       const opts: ShapeArgs = { depth, collapseIcons, collapseRepeats, cull };
       const infos = await Promise.all(
-        ids.map((nodeId) => sendCommandToFigma("get_node_info", { nodeId }))
+        ids.map((nodeId) => sendCommandToFigma("read_node", { nodeId }))
       );
       // Renumber across the whole batch so short ids share one counter space.
       const shaped = renumberIds(infos.map((info) => shapeNode(info, opts)));
@@ -1991,8 +1991,8 @@ This detailed process ensures you correctly interpret the reaction data, prepare
 type FigmaCommand =
   | "get_document_info"
   | "get_selection"
-  | "get_node_info"
-  | "get_node_info_raw"
+  | "read_node"
+  | "read_node_raw"
   | "write_nodes"
   | "set_fill_color"
   | "set_stroke_color"
@@ -2021,8 +2021,8 @@ type FigmaCommand =
 type CommandParams = {
   get_document_info: Record<string, never>;
   get_selection: Record<string, never>;
-  get_node_info: { nodeId: string };
-  get_node_info_raw: { nodeId: string };
+  read_node: { nodeId: string };
+  read_node_raw: { nodeId: string };
   write_nodes: {
     nodes: Array<Record<string, any>>;
   };
@@ -2136,33 +2136,6 @@ type CommandParams = {
 
 };
 
-
-// Helper function to process Figma node responses
-function processFigmaNodeResponse(result: unknown): any {
-  if (!result || typeof result !== "object") {
-    return result;
-  }
-
-  // Check if this looks like a node response
-  const resultObj = result as Record<string, unknown>;
-  if ("id" in resultObj && typeof resultObj.id === "string") {
-    // It appears to be a node response, log the details
-    console.info(
-      `Processed Figma node: ${resultObj.name || "Unknown"} (ID: ${resultObj.id
-      })`
-    );
-
-    if ("x" in resultObj && "y" in resultObj) {
-      console.debug(`Node position: (${resultObj.x}, ${resultObj.y})`);
-    }
-
-    if ("width" in resultObj && "height" in resultObj) {
-      console.debug(`Node dimensions: ${resultObj.width}×${resultObj.height}`);
-    }
-  }
-
-  return result;
-}
 
 // Update the connectToFigma function
 function connectToFigma(port: number = 3055) {
