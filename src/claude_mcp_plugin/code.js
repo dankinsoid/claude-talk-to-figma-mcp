@@ -54,6 +54,57 @@ async function sendProgressUpdate(
   return update;
 }
 
+/**
+ * Throttled progress reporter for one long-running command. Every emitted update
+ * resets the MCP server's inactivity timer, so a long run (many font loads,
+ * exports, component swaps) never trips the 30s command timeout. The first
+ * `start()` alone lifts the timeout from 30s to 60s; `tick()` keeps refreshing it.
+ *
+ * tick() is throttled to at most one update per `everyItems` items OR per
+ * `everyMs` ms, whichever comes first — so callers can call it on every node
+ * cheaply. start()/done() always emit. When total <= minItems the whole reporter
+ * is a no-op, so small interactive calls don't flash the progress bar.
+ *
+ * @param {string} commandType - tool name echoed in updates (e.g. "write_nodes")
+ * @param {number} total - expected item count (progress denominator)
+ * @param {{commandId?:string, minItems?:number, everyItems?:number, everyMs?:number}} [opts]
+ */
+function makeProgress(commandType, total, opts) {
+  opts = opts || {};
+  const commandId = opts.commandId || generateCommandId();
+  const minItems = opts.minItems != null ? opts.minItems : 0;
+  const everyItems = opts.everyItems != null ? opts.everyItems : 5;
+  const everyMs = opts.everyMs != null ? opts.everyMs : 1500;
+  const enabled = total > minItems;
+  let lastCount = 0;
+  let lastTime = 0;
+  // Cap in-progress at 99% — the expected total is a lower bound (failed specs
+  // skip their children), so the live ratio can otherwise read past 100.
+  const pct = (done) => (total > 0 ? Math.min(99, Math.round((done / total) * 100)) : 0);
+  return {
+    commandId,
+    enabled,
+    async start(message) {
+      if (!enabled) return;
+      lastTime = Date.now();
+      await sendProgressUpdate(commandId, commandType, "started", 0, total, 0, message);
+    },
+    /** Emit an in-progress update if the throttle window has elapsed (or force=true). */
+    async tick(done, message, force) {
+      if (!enabled) return;
+      const now = Date.now();
+      if (!force && done - lastCount < everyItems && now - lastTime < everyMs) return;
+      lastCount = done;
+      lastTime = now;
+      await sendProgressUpdate(commandId, commandType, "in_progress", pct(done), total, done, message);
+    },
+    async done(message) {
+      if (!enabled) return;
+      await sendProgressUpdate(commandId, commandType, "completed", 100, total, total, message);
+    },
+  };
+}
+
 // Show UI
 figma.showUI(__html__, { width: 350, height: 600 });
 
@@ -461,16 +512,8 @@ async function readNodeRaw(nodeId) {
 
 async function getReactions(nodeIds) {
   try {
-    const commandId = generateCommandId();
-    sendProgressUpdate(
-      commandId,
-      "get_reactions",
-      "started",
-      0,
-      nodeIds.length,
-      0,
-      `Starting deep search for reactions in ${nodeIds.length} nodes and their children`
-    );
+    const progress = makeProgress("get_reactions", nodeIds.length);
+    await progress.start(`Starting deep search for reactions in ${nodeIds.length} nodes and their children`);
 
     // Function to find nodes with reactions from the node and all its children
     async function findNodesWithReactions(node, processedNodes = new Set(), depth = 0, results = []) {
@@ -546,60 +589,27 @@ async function getReactions(nodeIds) {
         
         if (!node) {
           processedCount++;
-          sendProgressUpdate(
-            commandId,
-            "get_reactions",
-            "in_progress",
-            processedCount / totalCount,
-            totalCount,
-            processedCount,
-            `Node not found: ${nodeId}`
-          );
+          await progress.tick(processedCount, `Node not found: ${nodeId}`);
           continue;
         }
-        
+
         // Search for reactions in the node and its children
         const processedNodes = new Set();
         const nodeResults = await findNodesWithReactions(node, processedNodes);
-        
+
         // Add results
         allResults = allResults.concat(nodeResults);
-        
+
         // Update progress
         processedCount++;
-        sendProgressUpdate(
-          commandId,
-          "get_reactions",
-          "in_progress",
-          processedCount / totalCount,
-          totalCount,
-          processedCount,
-          `Processed node ${processedCount}/${totalCount}, found ${nodeResults.length} nodes with reactions`
-        );
+        await progress.tick(processedCount, `Processed node ${processedCount}/${totalCount}, found ${nodeResults.length} nodes with reactions`);
       } catch (error) {
         processedCount++;
-        sendProgressUpdate(
-          commandId,
-          "get_reactions",
-          "in_progress",
-          processedCount / totalCount,
-          totalCount,
-          processedCount,
-          `Error processing node: ${error.message}`
-        );
+        await progress.tick(processedCount, `Error processing node: ${error.message}`);
       }
     }
 
-    // Completion update
-    sendProgressUpdate(
-      commandId,
-      "get_reactions",
-      "completed",
-      1,
-      totalCount,
-      totalCount,
-      `Completed deep search: found ${allResults.length} nodes with reactions.`
-    );
+    await progress.done(`Completed deep search: found ${allResults.length} nodes with reactions.`);
 
     return {
       nodesCount: nodeIds.length,
@@ -630,33 +640,6 @@ function countSpecNodes(specs) {
   return n;
 }
 
-// Stream a progress update at most every PROGRESS_EVERY_NODES nodes or every
-// PROGRESS_EVERY_MS, whichever comes first. The cadence matters: each update
-// resets the MCP server's inactivity timer, so a long create (many nodes, slow
-// font loads) never trips the timeout even within one deep subtree.
-const PROGRESS_EVERY_NODES = 5;
-const PROGRESS_EVERY_MS = 1500;
-async function maybeEmitProgress(progress, counts) {
-  if (!progress) return;
-  const now = Date.now();
-  if (
-    counts.total - progress.lastCount < PROGRESS_EVERY_NODES &&
-    now - progress.lastTime < PROGRESS_EVERY_MS
-  ) {
-    return;
-  }
-  progress.lastCount = counts.total;
-  progress.lastTime = now;
-  // Cap at 99% until the final completed update; the expected total is a lower
-  // bound (failed specs skip their children) so the ratio can run high.
-  const pct = Math.min(99, Math.round((counts.total / progress.totalExpected) * 100));
-  await sendProgressUpdate(
-    progress.commandId, "write_nodes", "in_progress",
-    pct, progress.totalExpected, counts.total,
-    `Created ${counts.created}/${progress.totalExpected} nodes`
-  );
-}
-
 async function writeNodes(params) {
   const { nodes } = params || {};
   if (!Array.isArray(nodes) || nodes.length === 0) {
@@ -664,25 +647,21 @@ async function writeNodes(params) {
   }
 
   const counts = { created: 0, total: 0 };
-  const commandId = (params && params.commandId) || generateCommandId();
   const totalExpected = countSpecNodes(nodes);
-  const reportProgress = totalExpected > 3;
-  // Throttle state threaded through the recursion so descendants emit too.
-  const progress = reportProgress
-    ? { commandId, totalExpected, lastCount: 0, lastTime: Date.now() }
-    : null;
-  if (reportProgress) {
-    await sendProgressUpdate(commandId, "write_nodes", "started", 0, totalExpected, 0, `Creating ${totalExpected} nodes...`);
-  }
+  // minItems:3 — skip framing for tiny creates; the reporter throttles the
+  // per-node ticks emitted from inside the recursion (see createOneNode).
+  const progress = makeProgress("write_nodes", totalExpected, {
+    commandId: params && params.commandId,
+    minItems: 3,
+  });
+  await progress.start(`Creating ${totalExpected} nodes...`);
 
   const results = [];
   for (let i = 0; i < nodes.length; i++) {
     results.push(await createOneNode(nodes[i], figma.currentPage, counts, progress));
   }
 
-  if (reportProgress) {
-    await sendProgressUpdate(commandId, "write_nodes", "completed", 100, totalExpected, counts.total, `Done: ${counts.created} nodes created`);
-  }
+  await progress.done(`Done: ${counts.created} nodes created`);
 
   return { created: counts.created, total: counts.total, results };
 }
@@ -833,8 +812,9 @@ async function createOneNode(spec, fallbackParent, counts, progress) {
   const result = { ok: true, id: node.id, type: node.type, name: node.name };
   if (propErrors.length) result.errors = propErrors;
 
-  // Emit before recursing so each subtree level keeps the inactivity timer alive.
-  await maybeEmitProgress(progress, counts);
+  // Tick before recursing so each subtree level keeps the inactivity timer alive
+  // (throttled inside the reporter, so calling it per node is cheap).
+  if (progress) await progress.tick(counts.total, `Created ${counts.created} nodes so far`);
 
   if (Array.isArray(spec.children) && spec.children.length) {
     if (!("appendChild" in node)) {
@@ -904,20 +884,15 @@ async function getStyles() {
 }
 
 async function getLocalComponents(params) {
-  const commandId = (params && params.commandId) || generateCommandId();
   const pages = figma.root.children;
   const totalPages = pages.length;
-
-  await sendProgressUpdate(
-    commandId,
-    "get_local_components",
-    "started",
-    0,
-    totalPages,
-    0,
-    "Starting component scan across " + totalPages + " pages...",
-    null
-  );
+  // Page loadAsync + findAllWithCriteria per page can be slow on big files; frame
+  // and tick per page so the scan never trips the command timeout.
+  const progress = makeProgress("get_local_components", totalPages, {
+    commandId: params && params.commandId,
+    everyItems: 1,
+  });
+  await progress.start("Starting component scan across " + totalPages + " pages...");
 
   var allComponents = [];
 
@@ -936,29 +911,10 @@ async function getLocalComponents(params) {
       });
     }
 
-    var progress = Math.round(((i + 1) / totalPages) * 100);
-    await sendProgressUpdate(
-      commandId,
-      "get_local_components",
-      "in_progress",
-      progress,
-      totalPages,
-      i + 1,
-      "Scanned " + page.name + ": " + pageComponents.length + " components (total so far: " + allComponents.length + ")",
-      null
-    );
+    await progress.tick(i + 1, "Scanned " + page.name + ": " + pageComponents.length + " components (total so far: " + allComponents.length + ")");
   }
 
-  await sendProgressUpdate(
-    commandId,
-    "get_local_components",
-    "completed",
-    100,
-    totalPages,
-    totalPages,
-    "Found " + allComponents.length + " components across " + totalPages + " pages",
-    null
-  );
+  await progress.done("Found " + allComponents.length + " components across " + totalPages + " pages");
 
   return {
     count: allComponents.length,
@@ -1016,15 +972,27 @@ async function exportNodeAsImage(params) {
   const usesScale = format === "PNG" || format === "JPG";
   const scales = usesScale && Array.isArray(scale) ? scale : [usesScale ? scale : 1];
 
+  // exportAsync + base64-encoding a large node can run long; framing here lifts
+  // the command timeout from 30s to 60s, and a tick before each scale resets the
+  // inactivity timer right before that scale's heavy export begins.
+  const progress = makeProgress("export_node_as_image", scales.length, {
+    commandId: params && params.commandId,
+  });
+  await progress.start(`Exporting ${nodeId} as ${format} (${scales.length} scale(s))...`);
+
   try {
     const images = [];
-    for (const s of scales) {
+    for (let i = 0; i < scales.length; i++) {
+      const s = scales[i];
+      await progress.tick(i, `Exporting scale ${i + 1}/${scales.length} (@${s}x)`, true);
       const settings = usesScale
         ? { format, constraint: { type: "SCALE", value: s } }
         : { format };
       const bytes = await node.exportAsync(settings);
       images.push({ scale: s, imageData: customBase64Encode(bytes) });
     }
+
+    await progress.done(`Exported ${images.length} image(s)`);
 
     return {
       nodeId,
@@ -2027,16 +1995,14 @@ async function editNodes(params) {
   let applied = 0;
 
   // Long batches (many font loads / array reassigns) can exceed the 30s command
-  // timeout. Emit progress every CHUNK edits: each update resets the server's
-  // inactivity timer and yields so Figma's UI thread stays responsive. Small,
-  // interactive edits skip this to avoid flashing the progress bar.
+  // timeout. The reporter streams progress whose updates reset the server's
+  // inactivity timer; small interactive edits (<=5) skip framing.
   const total = edits.length;
-  const CHUNK = 5;
-  const commandId = (params && params.commandId) || generateCommandId();
-  const reportProgress = total > CHUNK;
-  if (reportProgress) {
-    await sendProgressUpdate(commandId, "edit_nodes", "started", 0, total, 0, `Applying ${total} edits...`);
-  }
+  const progress = makeProgress("edit_nodes", total, {
+    commandId: params && params.commandId,
+    minItems: 5,
+  });
+  await progress.start(`Applying ${total} edits...`);
 
   for (let i = 0; i < edits.length; i++) {
     const e = edits[i] || {};
@@ -2088,22 +2054,10 @@ async function editNodes(params) {
       r.error = err && err.message ? err.message : String(err);
     }
     results.push(r);
-
-    // Flush a progress update at each chunk boundary (the last partial chunk is
-    // covered by the "completed" update below).
-    if (reportProgress && (i + 1) % CHUNK === 0 && i + 1 < total) {
-      const done = i + 1;
-      await sendProgressUpdate(
-        commandId, "edit_nodes", "in_progress",
-        Math.round((done / total) * 100), total, done,
-        `Applied ${done}/${total} edits (${applied} ok)`
-      );
-    }
+    await progress.tick(i + 1, `Applied ${i + 1}/${total} edits (${applied} ok)`);
   }
 
-  if (reportProgress) {
-    await sendProgressUpdate(commandId, "edit_nodes", "completed", 100, total, total, `Done: ${applied}/${total} applied`);
-  }
+  await progress.done(`Done: ${applied}/${total} applied`);
 
   return { applied, total: edits.length, results };
 }
@@ -2232,6 +2186,14 @@ async function setAnnotations(params) {
   let successCount = 0;
   let failureCount = 0;
 
+  // Each setAnnotation loads the node's font; a big batch can exceed the 30s
+  // timeout, so stream progress (skip framing for small interactive batches).
+  const progress = makeProgress("set_annotations", annotations.length, {
+    commandId: params && params.commandId,
+    minItems: 5,
+  });
+  await progress.start(`Applying ${annotations.length} annotations...`);
+
   // Process annotations sequentially
   for (let i = 0; i < annotations.length; i++) {
     const annotation = annotations[i];
@@ -2284,7 +2246,10 @@ async function setAnnotations(params) {
         stack: error.stack,
       });
     }
+    await progress.tick(i + 1, `Applied ${i + 1}/${annotations.length} annotations (${successCount} ok)`);
   }
+
+  await progress.done(`Done: ${successCount}/${annotations.length} annotations applied`);
 
   const summary = {
     success: successCount > 0,
@@ -2303,36 +2268,18 @@ async function setAnnotations(params) {
 
 async function deleteNodes(params) {
   const { nodeIds } = params || {};
-  const commandId = generateCommandId();
 
   if (!nodeIds || !Array.isArray(nodeIds) || nodeIds.length === 0) {
-    const errorMsg = "Missing or invalid nodeIds parameter";
-    sendProgressUpdate(
-      commandId,
-      "delete_nodes",
-      "error",
-      0,
-      0,
-      0,
-      errorMsg,
-      { error: errorMsg }
-    );
-    throw new Error(errorMsg);
+    throw new Error("Missing or invalid nodeIds parameter");
   }
 
   console.log(`Starting deletion of ${nodeIds.length} nodes`);
 
-  // Send started progress update
-  sendProgressUpdate(
-    commandId,
-    "delete_nodes",
-    "started",
-    0,
-    nodeIds.length,
-    0,
-    `Starting deletion of ${nodeIds.length} nodes`,
-    { totalNodes: nodeIds.length }
-  );
+  const progress = makeProgress("delete_nodes", nodeIds.length, {
+    commandId: params && params.commandId,
+    minItems: 5,
+  });
+  await progress.start(`Starting deletion of ${nodeIds.length} nodes`);
 
   const results = [];
   let successCount = 0;
@@ -2348,45 +2295,12 @@ async function deleteNodes(params) {
 
   console.log(`Split ${nodeIds.length} deletions into ${chunks.length} chunks`);
 
-  // Send chunking info update
-  sendProgressUpdate(
-    commandId,
-    "delete_nodes",
-    "in_progress",
-    5,
-    nodeIds.length,
-    0,
-    `Preparing to delete ${nodeIds.length} nodes using ${chunks.length} chunks`,
-    {
-      totalNodes: nodeIds.length,
-      chunks: chunks.length,
-      chunkSize: CHUNK_SIZE,
-    }
-  );
-
   // Process each chunk sequentially
   for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
     const chunk = chunks[chunkIndex];
     console.log(
       `Processing chunk ${chunkIndex + 1}/${chunks.length} with ${chunk.length
       } nodes`
-    );
-
-    // Send chunk processing start update
-    sendProgressUpdate(
-      commandId,
-      "delete_nodes",
-      "in_progress",
-      Math.round(5 + (chunkIndex / chunks.length) * 90),
-      nodeIds.length,
-      successCount + failureCount,
-      `Processing deletion chunk ${chunkIndex + 1}/${chunks.length}`,
-      {
-        currentChunk: chunkIndex + 1,
-        totalChunks: chunks.length,
-        successCount,
-        failureCount,
-      }
     );
 
     // Process deletions within a chunk in parallel
@@ -2442,23 +2356,9 @@ async function deleteNodes(params) {
       results.push(result);
     });
 
-    // Send chunk processing complete update
-    sendProgressUpdate(
-      commandId,
-      "delete_nodes",
-      "in_progress",
-      Math.round(5 + ((chunkIndex + 1) / chunks.length) * 90),
-      nodeIds.length,
+    await progress.tick(
       successCount + failureCount,
-      `Completed chunk ${chunkIndex + 1}/${chunks.length
-      }. ${successCount} successful, ${failureCount} failed so far.`,
-      {
-        currentChunk: chunkIndex + 1,
-        totalChunks: chunks.length,
-        successCount,
-        failureCount,
-        chunkResults: chunkResults,
-      }
+      `Completed chunk ${chunkIndex + 1}/${chunks.length}. ${successCount} successful, ${failureCount} failed so far.`
     );
 
     // Add a small delay between chunks
@@ -2472,23 +2372,7 @@ async function deleteNodes(params) {
     `Deletion complete: ${successCount} successful, ${failureCount} failed`
   );
 
-  // Send completed progress update
-  sendProgressUpdate(
-    commandId,
-    "delete_nodes",
-    "completed",
-    100,
-    nodeIds.length,
-    successCount + failureCount,
-    `Node deletion complete: ${successCount} successful, ${failureCount} failed`,
-    {
-      totalNodes: nodeIds.length,
-      nodesDeleted: successCount,
-      nodesFailed: failureCount,
-      completedInChunks: chunks.length,
-      results: results,
-    }
-  );
+  await progress.done(`Node deletion complete: ${successCount} successful, ${failureCount} failed`);
 
   return {
     success: successCount > 0,
@@ -2497,7 +2381,7 @@ async function deleteNodes(params) {
     totalNodes: nodeIds.length,
     results: results,
     completedInChunks: chunks.length,
-    commandId,
+    commandId: progress.commandId,
   };
 }
 
@@ -2675,9 +2559,15 @@ async function setInstanceOverrides(targetInstances, sourceResult) {
     console.log(`Source instance: ${sourceInstance.id}, Main component: ${mainComponent.id}`);
     console.log(`Overrides:`, overrides);
 
+    // swapComponent + per-field font loads across many instances can exceed the
+    // 30s timeout; stream progress per instance (small batches skip framing).
+    const progress = makeProgress("set_instance_overrides", targetInstances.length, { minItems: 3 });
+    await progress.start(`Applying overrides to ${targetInstances.length} instances...`);
+
     // Process all instances
     const results = [];
     let totalAppliedCount = 0;
+    let processedCount = 0;
 
     for (const targetInstance of targetInstances) {
       try {
@@ -2799,7 +2689,11 @@ async function setInstanceOverrides(targetInstances, sourceResult) {
           message: `Error: ${instanceError.message}`
         });
       }
+      processedCount++;
+      await progress.tick(processedCount, `Processed ${processedCount}/${targetInstances.length} instances`);
     }
+
+    await progress.done(`Applied ${totalAppliedCount} overrides across ${targetInstances.length} instances`);
 
     // Return results
     if (totalAppliedCount > 0) {
@@ -3026,19 +2920,12 @@ async function createConnections(params) {
   }
   
   const { connections } = params;
-  
-  // Command ID for progress tracking
-  const commandId = generateCommandId();
-  sendProgressUpdate(
-    commandId,
-    "create_connections",
-    "started",
-    0,
-    connections.length,
-    0,
-    `Starting to create ${connections.length} connections`
-  );
-  
+
+  const progress = makeProgress("create_connections", connections.length, {
+    commandId: params && params.commandId,
+  });
+  await progress.start(`Starting to create ${connections.length} connections`);
+
   // Get default connector ID from client storage
   const defaultConnectorId = await figma.clientStorage.getAsync('defaultConnectorId');
   if (!defaultConnectorId) {
@@ -3170,48 +3057,23 @@ async function createConnections(params) {
       
       // Update progress
       processedCount++;
-      sendProgressUpdate(
-        commandId,
-        "create_connections",
-        "in_progress",
-        processedCount / totalCount,
-        totalCount,
-        processedCount,
-        `Created connection ${processedCount}/${totalCount}`
-      );
-      
+      await progress.tick(processedCount, `Created connection ${processedCount}/${totalCount}`);
+
     } catch (error) {
       console.error("Error creating connection", error);
       // Continue processing remaining connections even if an error occurs
       processedCount++;
-      sendProgressUpdate(
-        commandId,
-        "create_connections",
-        "in_progress",
-        processedCount / totalCount,
-        totalCount,
-        processedCount,
-        `Error creating connection: ${error.message}`
-      );
-      
+      await progress.tick(processedCount, `Error creating connection: ${error.message}`);
+
       results.push({
         error: error.message,
         connectionInfo: connections[i]
       });
     }
   }
-  
-  // Completion update
-  sendProgressUpdate(
-    commandId,
-    "create_connections",
-    "completed",
-    1,
-    totalCount,
-    totalCount,
-    `Completed creating ${results.length} connections`
-  );
-  
+
+  await progress.done(`Completed creating ${results.length} connections`);
+
   return {
     success: true,
     count: results.length,
