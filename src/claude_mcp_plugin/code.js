@@ -288,6 +288,10 @@ async function handleCommand(command, params) {
       return await setVariables(params);
     case "bind_variables":
       return await bindVariables(params);
+    case "transform_nodes":
+      return await transformNodes(params);
+    case "list_fonts":
+      return await listFonts(params);
     default:
       throw new Error(`Unknown command: ${command}`);
   }
@@ -3638,6 +3642,120 @@ async function booleanOperation(params) {
     type: result.type,
     booleanOperation: result.booleanOperation,
     childCount: result.children.length,
+  };
+}
+
+// Convert existing nodes into a node of a different kind, in place. One tool,
+// four ops with distinct shapes:
+//  - flatten:        figma.flatten(nodes, parent) — merges ALL nodeIds into ONE vector.
+//  - outline_stroke: node.outlineStroke() — per node; returns a NEW vector of the
+//      stroke rendered as fills, inserted above the original (original left intact).
+//      Returns null when the node has no stroke.
+//  - to_component:   figma.createComponentFromNode(node) — per node; replaces the node
+//      with a COMPONENT preserving its children (createComponent makes an empty one).
+//  - detach:         instance.detachInstance() — per node; INSTANCE -> standalone FRAME.
+async function transformNodes(params) {
+  const { operation, nodeIds, name, parentId } = params || {};
+  const OPS = ["flatten", "outline_stroke", "to_component", "detach"];
+  if (OPS.indexOf(operation) === -1) {
+    throw new Error(`transform_nodes requires \`operation\` one of: ${OPS.join(", ")}`);
+  }
+  if (!Array.isArray(nodeIds) || nodeIds.length === 0) {
+    throw new Error("transform_nodes requires a non-empty `nodeIds` array");
+  }
+
+  const nodes = [];
+  for (const id of nodeIds) {
+    const node = await figma.getNodeByIdAsync(id);
+    if (!node) throw new Error(`Node not found: ${id}`);
+    nodes.push(node);
+  }
+
+  // flatten consumes all operands into a single vector; the others map 1:1.
+  if (operation === "flatten") {
+    let parent = nodes[0].parent || figma.currentPage;
+    if (parentId) {
+      parent = await figma.getNodeByIdAsync(parentId);
+      if (!parent) throw new Error(`Parent not found: ${parentId}`);
+    }
+    // Throws if an operand can't be flattened or the parent can't host the result.
+    const v = figma.flatten(nodes, parent);
+    if (typeof name === "string" && name) v.name = name;
+    return {
+      success: true,
+      operation,
+      results: [{ oldIds: nodeIds, newId: v.id, name: v.name, type: v.type }],
+    };
+  }
+
+  const results = [];
+  for (const node of nodes) {
+    if (operation === "outline_stroke") {
+      const v = node.outlineStroke();
+      results.push(
+        v
+          ? { oldId: node.id, newId: v.id, name: v.name, type: v.type }
+          : { oldId: node.id, newId: null, skipped: "node has no stroke to outline" }
+      );
+    } else if (operation === "to_component") {
+      if (node.type === "COMPONENT" || node.type === "COMPONENT_SET") {
+        results.push({ oldId: node.id, newId: node.id, skipped: `already ${node.type}` });
+        continue;
+      }
+      // Replaces the node in place, preserving its children/content.
+      const comp = figma.createComponentFromNode(node);
+      results.push({ oldId: node.id, newId: comp.id, name: comp.name, type: comp.type });
+    } else if (operation === "detach") {
+      if (node.type !== "INSTANCE") {
+        throw new Error(`detach requires INSTANCE nodes; ${node.id} is ${node.type}`);
+      }
+      const frame = node.detachInstance();
+      results.push({ oldId: node.id, newId: frame.id, name: frame.name, type: frame.type });
+    }
+  }
+
+  // A single produced node can take an explicit name; naming N nodes the same is ambiguous.
+  if (typeof name === "string" && name && results.length === 1 && results[0].newId) {
+    const n = await figma.getNodeByIdAsync(results[0].newId);
+    if (n) {
+      n.name = name;
+      results[0].name = name;
+    }
+  }
+
+  return { success: true, operation, results };
+}
+
+// List fonts loadable via loadFontAsync, so the agent doesn't guess names.
+// listAvailableFontsAsync returns thousands of {fontName:{family,style}}; group
+// by family and filter by an optional case-insensitive substring on the family.
+async function listFonts(params) {
+  const { query, limit } = params || {};
+  const cap = typeof limit === "number" && limit > 0 ? limit : 200;
+  const q = typeof query === "string" ? query.trim().toLowerCase() : "";
+
+  const fonts = await figma.listAvailableFontsAsync();
+  const byFamily = new Map();
+  for (const f of fonts) {
+    const family = f.fontName.family;
+    if (q && family.toLowerCase().indexOf(q) === -1) continue;
+    if (!byFamily.has(family)) byFamily.set(family, []);
+    byFamily.get(family).push(f.fontName.style);
+  }
+
+  const allFamilies = Array.from(byFamily.keys()).sort();
+  const families = allFamilies.slice(0, cap).map((family) => ({
+    family,
+    styles: byFamily.get(family),
+  }));
+
+  return {
+    success: true,
+    query: q || null,
+    totalFamilies: allFamilies.length,
+    returnedFamilies: families.length,
+    truncated: allFamilies.length > families.length,
+    families,
   };
 }
 
