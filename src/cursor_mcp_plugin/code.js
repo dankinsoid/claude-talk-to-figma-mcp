@@ -349,6 +349,17 @@ function filterFigmaNode(node) {
     type: node.type,
   };
 
+  // Hidden node: the server shows it as {id, hidden:true} (unless it's the
+  // requested root). Without this flag a hidden node is indistinguishable from
+  // a visible one downstream.
+  if (node.visible === false) {
+    filtered.visible = false;
+  }
+  // Layer opacity (distinct from fill alpha); only the non-default is meaningful.
+  if (node.opacity !== undefined && node.opacity !== 1) {
+    filtered.opacity = node.opacity;
+  }
+
   // Lets the server collapse repeated instances of the same component (consumed,
   // not echoed): the first instance is shown in full, later copies as a stub.
   if (node.componentId) {

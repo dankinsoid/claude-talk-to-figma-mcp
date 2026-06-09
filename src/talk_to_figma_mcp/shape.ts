@@ -1,26 +1,26 @@
-// @ai-generated(solo)
+// @ai-generated(guided)
 // Compaction layer for Figma node trees returned to the agent.
 //
 // The Figma plugin returns a fully-recursive, verbose tree (every descendant
 // with full geometry/paints/styles). Feeding that straight to the model burns
 // tokens and slows every turn. shapeNode() reshapes that tree into a compact,
-// "zoomable" form: a depth budget cuts the tree and leaves drill-in stubs,
-// icon-like subtrees collapse to a single line, repeated paints hoist into a
-// shared `_defs` table, keys/numbers shrink, and default values are dropped.
+// "zoomable" form and keeps only a fixed, minimal field set per node:
 //
-// Phase 1 lives here on the server: it reshapes whatever the plugin already
-// sent. It cannot surface fields the plugin never emits (padding, itemSpacing,
-// layoutMode, effects) — those need a plugin-side traversal (phase 2).
-
-/** Field groups a detail profile may switch on. `text` characters are always kept. */
-interface Fields {
-  box: boolean;
-  style: boolean;
-  text: boolean;
-  full: boolean;
-}
-
-export type DetailProfile = "skeleton" | "box" | "style" | "text" | "auto" | "full";
+//   id, name, type
+//   color | gradient | image   — top-most visible fill (paint opacity folded
+//                                 into the hex alpha; gradient = stop colors only)
+//   opacity                     — node layer opacity, only when != 1
+//   box [x,y,w,h]               — absolute extent, OR
+//   autoLayout {flow,gap,pad[],alignMain,alignCross,size}  — for auto-layout
+//                                 containers (size = how it fits its own parent)
+//   size                        — fill/hug/px, for non-container children in a stack
+//   text                        — characters (no font styling)
+//   hidden: true                — for a non-root node with visible:false (id only)
+//
+// A depth/node budget cuts the tree and leaves drill-in stubs ({childCount,
+// more:true}); icon-like subtrees collapse to one ICON line; repeated instances
+// of the same component collapse to the first copy plus stubs carrying the
+// differentiating props/text.
 
 export interface ShapeOptions {
   /**
@@ -31,7 +31,6 @@ export interface ShapeOptions {
   maxNodes?: number;
   /** Optional hard depth cap (levels of children). Default: unbounded (budget governs). */
   depth?: number;
-  detail?: DetailProfile;
   /** Collapse icon-like subtrees (no text, vector leaves) to one ICON node. */
   collapseIcons?: boolean;
   /**
@@ -40,20 +39,7 @@ export interface ShapeOptions {
    * differentiating text. Default true.
    */
   collapseRepeats?: boolean;
-  /** Hoist paints/strokes used more than once into a shared `_defs` table. */
-  dedupe?: boolean;
 }
-
-const PROFILES: Record<DetailProfile, Fields> = {
-  skeleton: { box: false, style: false, text: false, full: false },
-  box: { box: true, style: false, text: false, full: false },
-  style: { box: true, style: true, text: false, full: false },
-  text: { box: true, style: false, text: true, full: false },
-  // auto keeps characters (always emitted) but drops font styling — what
-  // matters by default is structure, text content, and positioning, not type specs.
-  auto: { box: true, style: false, text: false, full: false },
-  full: { box: true, style: true, text: true, full: true },
-};
 
 /** Leaf node types that count as "drawing" rather than content. */
 const VECTOR_LEAF = new Set([
@@ -88,37 +74,41 @@ function colorToHex(color: any): string {
   return `#${hex(r)}${hex(g)}${hex(b)}${a === 255 ? "" : hex(a)}`;
 }
 
-/** Compact a single paint (fill or stroke). Drops NORMAL blendMode and defaults. */
-function compactPaint(paint: any, full: boolean): any {
-  const p: any = { type: paint.type };
-  if (paint.visible === false) p.visible = false;
-  if (paint.opacity !== undefined && paint.opacity !== 1) p.opacity = round(paint.opacity, 2);
-  if (paint.color) p.color = colorToHex(paint.color);
-  // Gradient stops: "#rrggbbaa@pos". Fixes the plugin bug where gradient stops
-  // inside strokes keep raw {r,g,b,a} objects (plugin only hexes fill stops).
-  if (paint.gradientStops) {
-    p.stops = paint.gradientStops.map(
-      (s: any) => `${colorToHex(s.color)}@${round(s.position, 2)}`
-    );
+/**
+ * Fold a paint's layer opacity into the color's hex alpha, so a single hex
+ * string carries the visible transparency (e.g. white @0.5 -> "#ffffff80").
+ * `hex` is "#rrggbb" or "#rrggbbaa" (plugin already converted color rgba).
+ */
+function applyAlpha(hex: string, opacity?: number): string {
+  let base = 255;
+  let rgb = hex;
+  if (hex.length === 9) {
+    base = parseInt(hex.slice(7, 9), 16);
+    rgb = hex.slice(0, 7);
   }
-  if (paint.scaleMode) p.scaleMode = paint.scaleMode; // image fills
-  // Handle positions are only needed to *recreate* a gradient — keep in `full`.
-  if (full && paint.gradientHandlePositions) {
-    p.handles = paint.gradientHandlePositions.map((h: any) => [round(h.x, 3), round(h.y, 3)]);
-  }
-  return p;
+  const eff = Math.round(base * (opacity ?? 1));
+  if (eff >= 255) return rgb;
+  return rgb + eff.toString(16).padStart(2, "0");
 }
 
-function compactTextStyle(s: any, full: boolean): any {
-  const o: any = {};
-  if (s.fontFamily) o.font = s.fontFamily;
-  if (s.fontStyle && s.fontStyle !== "Regular") o.fontStyle = s.fontStyle;
-  if (s.fontWeight && s.fontWeight !== 400) o.weight = s.fontWeight;
-  if (s.fontSize) o.size = round(s.fontSize, 1);
-  if (s.textAlignHorizontal && s.textAlignHorizontal !== "LEFT") o.align = s.textAlignHorizontal;
-  if (s.letterSpacing) o.letterSpacing = round(s.letterSpacing, 2); // 0 dropped
-  if (full && s.lineHeightPx) o.lineHeight = round(s.lineHeightPx, 1);
-  return o;
+/**
+ * Reduce a node's fills to its dominant paint: the top-most visible one.
+ * SOLID -> {color}, gradient -> {gradient: [stop colors]}, image -> {image}.
+ * Stroke/cornerRadius are intentionally dropped from the compact view.
+ */
+function fillInfo(fills: any[]): { color?: string; gradient?: string[]; image?: boolean } | null {
+  if (!Array.isArray(fills) || !fills.length) return null;
+  let paint: any = null;
+  for (const p of fills) if (p && p.visible !== false) paint = p; // last visible = top of stack
+  if (!paint) return null;
+  if (paint.type === "SOLID" && paint.color) {
+    return { color: applyAlpha(colorToHex(paint.color), paint.opacity) };
+  }
+  if (paint.gradientStops) {
+    return { gradient: paint.gradientStops.map((s: any) => applyAlpha(colorToHex(s.color), paint.opacity)) };
+  }
+  if (paint.type === "IMAGE") return { image: true };
+  return null;
 }
 
 /** True if no TEXT node anywhere in the subtree. */
@@ -153,10 +143,11 @@ function isIcon(node: any, curDepth: number): boolean {
   return hasNoText(node) && allLeavesVector(node);
 }
 
-function box(node: any): { x: number; y: number; w: number; h: number } | undefined {
+/** Absolute extent/position as [x, y, w, h]. */
+function box(node: any): number[] | undefined {
   const b = node.absoluteBoundingBox;
   if (!b) return undefined;
-  return { x: dim(b.x), y: dim(b.y), w: dim(b.width), h: dim(b.height) };
+  return [dim(b.x), dim(b.y), dim(b.width), dim(b.height)];
 }
 
 type Stack = "h" | "v" | null;
@@ -188,47 +179,31 @@ function axisSize(node: any, parent: Stack, self: Stack, dim: "w" | "h", px: num
   return px;
 }
 
-/**
- * Collapse padding to the most compact self-describing form: a single value
- * when uniform, {vertical,horizontal} for symmetric pairs, else a {top,right,
- * bottom,left} object. Object forms omit zero sides. Keyed (not positional) so
- * the agent never has to recall an order.
- */
-function padOf(node: any): number | Record<string, number> | undefined {
+/** Padding as [left, top, right, bottom]; undefined when all sides are zero. */
+function padArray(node: any): number[] | undefined {
   const t = dim(node.paddingTop || 0);
   const r = dim(node.paddingRight || 0);
   const b = dim(node.paddingBottom || 0);
   const l = dim(node.paddingLeft || 0);
   if (!(t || r || b || l)) return undefined;
-  if (t === r && r === b && b === l) return t;
-  const o: Record<string, number> = {};
-  if (t === b && l === r) {
-    if (t) o.vertical = t;
-    if (l) o.horizontal = l;
-    return o;
-  }
-  if (t) o.top = t;
-  if (r) o.right = r;
-  if (b) o.bottom = b;
-  if (l) o.left = l;
-  return o;
+  return [l, t, r, b];
 }
 
 /**
- * Emit auto-layout container spec: stack/gap/padding/align (positions, not
- * coords). Values are canonical Figma enums (HORIZONTAL/VERTICAL, MIN/CENTER/
- * MAX/SPACE_BETWEEN/BASELINE) so they round-trip into set_layout_mode /
- * set_axis_align without translation.
+ * Auto-layout container spec: flow/gap/padding/align plus how the container
+ * itself sizes within its parent. Align values are canonical Figma enums
+ * (MIN/CENTER/MAX/SPACE_BETWEEN/BASELINE) for round-trip into set_axis_align.
  */
-function layoutSpec(node: any, out: any, stack: Stack): void {
-  if (!stack) return;
-  out.stack = stack === "h" ? "HORIZONTAL" : "VERTICAL";
-  if (node.itemSpacing) out.gap = dim(node.itemSpacing);
-  const pad = padOf(node);
-  if (pad !== undefined) out.pad = pad;
+function autoLayoutOf(node: any, stack: "h" | "v", size: any): any {
+  const al: any = { flow: stack };
+  if (node.itemSpacing) al.gap = dim(node.itemSpacing);
+  const pad = padArray(node);
+  if (pad) al.pad = pad;
   // Plugin only forwards non-default (non-MIN) alignment, so presence => meaningful.
-  if (node.primaryAxisAlignItems) out.alignMain = node.primaryAxisAlignItems;
-  if (node.counterAxisAlignItems) out.alignCross = node.counterAxisAlignItems;
+  if (node.primaryAxisAlignItems) al.alignMain = node.primaryAxisAlignItems;
+  if (node.counterAxisAlignItems) al.alignCross = node.counterAxisAlignItems;
+  if (size !== undefined) al.size = size;
+  return al;
 }
 
 /**
@@ -315,6 +290,7 @@ function planExpansion(root: any, opts: Required<ShapeOptions>, repeats: Set<str
 
 /** Minimal stub for a truncated node: identity + extent + a drill-in marker. */
 function stubNode(node: any, collapseIcons: boolean): any {
+  if (node.visible === false) return { id: node.id, hidden: true };
   const out: any = { id: node.id, name: node.name, type: node.type };
   // A truncated icon reads better as ICON than a generic stub (stubs are always
   // below the root, so depth is non-zero — icon detection is valid here).
@@ -332,61 +308,63 @@ function stubNode(node: any, collapseIcons: boolean): any {
 function shapeRec(
   node: any,
   opts: Required<ShapeOptions>,
-  f: Fields,
   curDepth: number,
   parent: Stack,
   expand: Set<string>,
   repeats: Set<string>
 ): any {
+  // Hidden nodes (except the requested root) collapse to a bare presence marker.
+  if (curDepth > 0 && node.visible === false) return { id: node.id, hidden: true };
+
   const out: any = { id: node.id, name: node.name, type: node.type };
 
   if (opts.collapseIcons && isIcon(node, curDepth)) {
     out.type = "ICON";
-    if (f.box) out.box = box(node);
+    const b = box(node);
+    if (b) out.box = b;
     out.more = true; // drill in with get_node_info(id) for the real vectors
     return out;
   }
 
   const isRepeat = repeats.has(node.id);
   const myStack = stackOf(node);
+
+  // Paint: top-most visible fill, as color / gradient / image.
+  const fi = node.fills && fillInfo(node.fills);
+  if (fi) {
+    if (fi.color) out.color = fi.color;
+    else if (fi.gradient) out.gradient = fi.gradient;
+    else if (fi.image) out.image = true;
+  }
+  if (node.opacity !== undefined && node.opacity !== 1) out.opacity = round(node.opacity, 2);
+
   // Geometry: inside an auto-layout parent a child's x/y are layout-determined,
-  // so we drop them and express only sizing (fill vs fixed px). Absolutely-
+  // so we drop them and express only sizing (fill vs hug vs px). Absolutely-
   // positioned children and nodes under a non-layout parent keep the full box.
-  if (f.box) {
-    const absolute = node.layoutPositioning === "ABSOLUTE";
-    if (parent && !absolute) {
-      const b = node.absoluteBoundingBox;
-      if (b) {
-        const w = axisSize(node, parent, myStack, "w", dim(b.width));
-        const h = axisSize(node, parent, myStack, "h", dim(b.height));
-        // Collapse to a bare "fill"/"hug" when both axes share that mode.
-        out.size = w === h && typeof w === "string" ? w : { w, h };
-      }
-    } else {
-      const b = box(node);
-      if (b) out.box = b;
+  const absolute = node.layoutPositioning === "ABSOLUTE";
+  let size: any = undefined;
+  if (parent && !absolute) {
+    const b = node.absoluteBoundingBox;
+    if (b) {
+      const w = axisSize(node, parent, myStack, "w", dim(b.width));
+      const h = axisSize(node, parent, myStack, "h", dim(b.height));
+      size = w === h && typeof w === "string" ? w : [w, h];
     }
   }
-  // A collapsed repeat hides its internals, so its internal arrangement is moot.
-  if (f.box && !isRepeat) layoutSpec(node, out, myStack);
-  if (node.cornerRadius !== undefined && (f.style || f.box)) {
-    out.cornerRadius = round(node.cornerRadius, 1);
+  const boxArr = !parent || absolute ? box(node) : undefined;
+
+  if (myStack && !isRepeat) {
+    // Auto-layout container: its arrangement (with own size folded in). A
+    // top-level container not in a flow keeps its absolute box too.
+    out.autoLayout = autoLayoutOf(node, myStack, size);
+    if (boxArr) out.box = boxArr;
+  } else {
+    if (size !== undefined) out.size = size;
+    if (boxArr) out.box = boxArr;
   }
-  if (f.style) {
-    if (node.fills && node.fills.length) out.fills = node.fills.map((x: any) => compactPaint(x, f.full));
-    if (node.strokes && node.strokes.length) {
-      out.strokes = node.strokes.map((x: any) => compactPaint(x, f.full));
-      // Thickness kept at full precision — stroke weights are small and often
-      // sub-pixel, so rounding to int would distort or erase them.
-      if (node.strokeWeight !== undefined) out.strokeWeight = round(node.strokeWeight, 2);
-    }
-  }
-  // Text characters are the semantic anchor — keep them on every profile.
-  if (node.characters !== undefined) out.characters = node.characters;
-  if (node.style && (f.text || f.style)) {
-    const ts = compactTextStyle(node.style, f.full);
-    if (Object.keys(ts).length) out.style = ts;
-  }
+
+  // Text characters are the semantic anchor — keep them, drop font styling.
+  if (node.characters !== undefined) out.text = node.characters;
 
   const kids: any[] = node.children || [];
   if (kids.length) {
@@ -404,7 +382,7 @@ function shapeRec(
       // shapeRec handles each child's own state (icon / repeat / full); only
       // budget-truncated children (not in expand) become generic stubs.
       out.children = kids.map((c) =>
-        expand.has(c.id) ? shapeRec(c, opts, f, curDepth + 1, myStack, expand, repeats) : stubNode(c, opts.collapseIcons)
+        expand.has(c.id) ? shapeRec(c, opts, curDepth + 1, myStack, expand, repeats) : stubNode(c, opts.collapseIcons)
       );
     } else {
       // Node itself reached the budget edge — surface as a stub in place.
@@ -415,63 +393,18 @@ function shapeRec(
   return out;
 }
 
-/** Hoist fills/strokes arrays used more than once into a shared table. */
-function dedupe(root: any): Record<string, any> | undefined {
-  const counts = new Map<string, number>();
-  const walk = (n: any, fn: (key: string) => void) => {
-    for (const k of ["fills", "strokes"] as const) {
-      if (n[k]) fn(JSON.stringify(n[k]));
-    }
-    if (n.children) n.children.forEach((c: any) => walk(c, fn));
-  };
-  walk(root, (key) => counts.set(key, (counts.get(key) || 0) + 1));
-
-  const defs: Record<string, any> = {};
-  const keyFor = new Map<string, string>();
-  let n = 0;
-  for (const [json, count] of counts) {
-    if (count > 1) {
-      const ref = `@${++n}`;
-      keyFor.set(json, ref);
-      defs[ref] = JSON.parse(json);
-    }
-  }
-  if (n === 0) return undefined;
-
-  const replace = (node: any) => {
-    for (const k of ["fills", "strokes"] as const) {
-      if (node[k]) {
-        const ref = keyFor.get(JSON.stringify(node[k]));
-        if (ref) node[k] = ref;
-      }
-    }
-    if (node.children) node.children.forEach(replace);
-  };
-  replace(root);
-  return defs;
-}
-
 /**
- * Reshape a plugin node tree into the compact agent-facing form.
- * Returns the shaped root; when paints were hoisted it carries `_defs`,
- * a table that `@N` string references in `fills`/`strokes` resolve against.
+ * Reshape a plugin node tree into the compact agent-facing form (fixed minimal
+ * field set; see file header). Returns the shaped root.
  */
 export function shapeNode(node: any, options: ShapeOptions = {}): any {
   const opts: Required<ShapeOptions> = {
     maxNodes: options.maxNodes ?? 100,
     depth: options.depth ?? Infinity,
-    detail: options.detail ?? "auto",
     collapseIcons: options.collapseIcons ?? true,
     collapseRepeats: options.collapseRepeats ?? true,
-    dedupe: options.dedupe ?? true,
   };
-  const fields = PROFILES[opts.detail] ?? PROFILES.auto;
   const repeats = planRepeats(node, opts.collapseRepeats);
   const expand = planExpansion(node, opts, repeats);
-  const shaped = shapeRec(node, opts, fields, 0, null, expand, repeats);
-  if (opts.dedupe && fields.style) {
-    const defs = dedupe(shaped);
-    if (defs) shaped._defs = defs;
-  }
-  return shaped;
+  return shapeRec(node, opts, 0, null, expand, repeats);
 }

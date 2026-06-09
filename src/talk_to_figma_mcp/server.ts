@@ -8,7 +8,7 @@ import { v4 as uuidv4 } from "uuid";
 import { writeFile, readFile, mkdir } from "fs/promises";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
-import { shapeNode, type DetailProfile } from "./shape.js";
+import { shapeNode } from "./shape.js";
 
 // Define TypeScript interfaces for Figma responses
 interface FigmaResponse {
@@ -192,12 +192,6 @@ server.tool(
 // view: structure + text + integer boxes, 2 levels deep, icons collapsed.
 // Drill deeper by re-calling with a child nodeId and/or a larger depth.
 const shapeParams = {
-  detail: z
-    .enum(["skeleton", "box", "style", "text", "auto", "full"])
-    .optional()
-    .describe(
-      "Detail profile. skeleton=structure only; box=+integer bounds; text=+characters & font; style=+fills/strokes/gradients; full=everything; auto (default)=structure+text+box. Text characters are always included."
-    ),
   maxNodes: z
     .number()
     .int()
@@ -218,32 +212,26 @@ const shapeParams = {
     .boolean()
     .optional()
     .describe("Collapse repeated instances of the same component: the first renders in full, later copies become a stub with their props/text and more:true (default true)."),
-  dedupe: z
-    .boolean()
-    .optional()
-    .describe("Hoist repeated fills/strokes into a shared _defs table referenced by @N strings (default true; only applies when paints are included)."),
 };
 
 type ShapeArgs = {
-  detail?: DetailProfile;
   maxNodes?: number;
   depth?: number;
   collapseIcons?: boolean;
   collapseRepeats?: boolean;
-  dedupe?: boolean;
 };
 
 // Read My Design Tool
 server.tool(
   "read_my_design",
-  "Get information about the current selection in Figma, compacted for low token cost. Same detail/depth/collapse controls as get_node_info.",
+  "Get information about the current selection in Figma, compacted for low token cost. Same depth/collapse controls as get_node_info.",
   {
     ...shapeParams,
     ...saveParams,
   },
-  async ({ detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe, saveToFile, outputPath }: any) => {
+  async ({ maxNodes, depth, collapseIcons, collapseRepeats, saveToFile, outputPath }: any) => {
     try {
-      const opts: ShapeArgs = { detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe };
+      const opts: ShapeArgs = { maxNodes, depth, collapseIcons, collapseRepeats };
       const result = await sendCommandToFigma("read_my_design", {});
       const shaped = Array.isArray(result)
         ? result.map((r: any) => (r && r.document ? { ...r, document: shapeNode(r.document, opts) } : r))
@@ -268,16 +256,16 @@ server.tool(
 // Node Info Tool
 server.tool(
   "get_node_info",
-  "Get information about a specific node in Figma, compacted for low token cost. Returns a structure+text view by default; widen with detail/depth to zoom in.",
+  "Get information about a specific node in Figma, compacted for low token cost. Returns a fixed minimal field set per node (id, name, type, color/gradient, opacity, box or autoLayout, text); raise depth/maxNodes to zoom in on stubbed subtrees.",
   {
     nodeId: z.string().describe("The ID of the node to get information about"),
     ...shapeParams,
     ...saveParams,
   },
-  async ({ nodeId, detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe, saveToFile, outputPath }: any) => {
+  async ({ nodeId, maxNodes, depth, collapseIcons, collapseRepeats, saveToFile, outputPath }: any) => {
     try {
       const result = await sendCommandToFigma("get_node_info", { nodeId });
-      const shaped = shapeNode(result, { detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe });
+      const shaped = shapeNode(result, { maxNodes, depth, collapseIcons, collapseRepeats });
       return {
         content: [await jsonContent(shaped, { saveToFile, outputPath }, "node-info")]
       };
@@ -401,15 +389,15 @@ function filterFigmaNode(node: any) {
 // Nodes Info Tool
 server.tool(
   "get_nodes_info",
-  "Get information about multiple nodes in Figma, compacted for low token cost. Same detail/depth/collapse controls as get_node_info.",
+  "Get information about multiple nodes in Figma, compacted for low token cost. Same depth/collapse controls as get_node_info.",
   {
     nodeIds: z.array(z.string()).describe("Array of node IDs to get information about"),
     ...shapeParams,
     ...saveParams,
   },
-  async ({ nodeIds, detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe, saveToFile, outputPath }: any) => {
+  async ({ nodeIds, maxNodes, depth, collapseIcons, collapseRepeats, saveToFile, outputPath }: any) => {
     try {
-      const opts: ShapeArgs = { detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe };
+      const opts: ShapeArgs = { maxNodes, depth, collapseIcons, collapseRepeats };
       const results = await Promise.all(
         nodeIds.map(async (nodeId: any) => {
           const result = await sendCommandToFigma('get_node_info', { nodeId });
