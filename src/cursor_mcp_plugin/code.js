@@ -2322,6 +2322,18 @@ async function editNodes(params) {
   const results = [];
   let applied = 0;
 
+  // Long batches (many font loads / array reassigns) can exceed the 30s command
+  // timeout. Emit progress every CHUNK edits: each update resets the server's
+  // inactivity timer and yields so Figma's UI thread stays responsive. Small,
+  // interactive edits skip this to avoid flashing the progress bar.
+  const total = edits.length;
+  const CHUNK = 5;
+  const commandId = (params && params.commandId) || generateCommandId();
+  const reportProgress = total > CHUNK;
+  if (reportProgress) {
+    await sendProgressUpdate(commandId, "edit_nodes", "started", 0, total, 0, `Applying ${total} edits...`);
+  }
+
   for (let i = 0; i < edits.length; i++) {
     const e = edits[i] || {};
     const r = { nodeId: e.nodeId, path: e.path };
@@ -2372,6 +2384,21 @@ async function editNodes(params) {
       r.error = err && err.message ? err.message : String(err);
     }
     results.push(r);
+
+    // Flush a progress update at each chunk boundary (the last partial chunk is
+    // covered by the "completed" update below).
+    if (reportProgress && (i + 1) % CHUNK === 0 && i + 1 < total) {
+      const done = i + 1;
+      await sendProgressUpdate(
+        commandId, "edit_nodes", "in_progress",
+        Math.round((done / total) * 100), total, done,
+        `Applied ${done}/${total} edits (${applied} ok)`
+      );
+    }
+  }
+
+  if (reportProgress) {
+    await sendProgressUpdate(commandId, "edit_nodes", "completed", 100, total, total, `Done: ${applied}/${total} applied`);
   }
 
   return { applied, total: edits.length, results };
