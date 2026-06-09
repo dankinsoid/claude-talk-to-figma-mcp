@@ -690,6 +690,7 @@ const NODE_FACTORIES = {
   COMPONENT: () => figma.createComponent(),
   SECTION: () => figma.createSection(),
   SLICE: () => figma.createSlice(),
+  CODE_BLOCK: () => figma.createCodeBlock(), // FigJam-only; throws in a Figma design file
 };
 
 // Keys consumed by the spec itself rather than written onto the node.

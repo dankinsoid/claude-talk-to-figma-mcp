@@ -983,6 +983,21 @@ var GENERATED_FIELDS = {
     "visible": z2.boolean(),
     "x": z2.number(),
     "y": z2.number()
+  },
+  CODE_BLOCK: {
+    "blendMode": BlendMode,
+    "code": z2.string(),
+    "codeLanguage": z2.enum(["TYPESCRIPT", "CPP", "RUBY", "CSS", "JAVASCRIPT", "HTML", "JSON", "GRAPHQL", "PYTHON", "GO", "SQL", "SWIFT", "KOTLIN", "RUST", "BASH", "PLAINTEXT", "DART"]),
+    "locked": z2.boolean(),
+    "maxHeight": z2.number().nullable(),
+    "maxWidth": z2.number().nullable(),
+    "minHeight": z2.number().nullable(),
+    "minWidth": z2.number().nullable(),
+    "name": z2.string(),
+    "opacity": z2.number(),
+    "visible": z2.boolean(),
+    "x": z2.number(),
+    "y": z2.number()
   }
 };
 
@@ -1000,7 +1015,8 @@ var NODE_TYPES = [
   "SECTION",
   "SLICE",
   "INSTANCE",
-  "SVG"
+  "SVG",
+  "CODE_BLOCK"
 ];
 var NOTES = {
   x: "parent-relative x (ignored inside an auto-layout parent)",

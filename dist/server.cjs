@@ -1005,6 +1005,21 @@ var GENERATED_FIELDS = {
     "visible": import_zod2.z.boolean(),
     "x": import_zod2.z.number(),
     "y": import_zod2.z.number()
+  },
+  CODE_BLOCK: {
+    "blendMode": BlendMode,
+    "code": import_zod2.z.string(),
+    "codeLanguage": import_zod2.z.enum(["TYPESCRIPT", "CPP", "RUBY", "CSS", "JAVASCRIPT", "HTML", "JSON", "GRAPHQL", "PYTHON", "GO", "SQL", "SWIFT", "KOTLIN", "RUST", "BASH", "PLAINTEXT", "DART"]),
+    "locked": import_zod2.z.boolean(),
+    "maxHeight": import_zod2.z.number().nullable(),
+    "maxWidth": import_zod2.z.number().nullable(),
+    "minHeight": import_zod2.z.number().nullable(),
+    "minWidth": import_zod2.z.number().nullable(),
+    "name": import_zod2.z.string(),
+    "opacity": import_zod2.z.number(),
+    "visible": import_zod2.z.boolean(),
+    "x": import_zod2.z.number(),
+    "y": import_zod2.z.number()
   }
 };
 
@@ -1022,7 +1037,8 @@ var NODE_TYPES = [
   "SECTION",
   "SLICE",
   "INSTANCE",
-  "SVG"
+  "SVG",
+  "CODE_BLOCK"
 ];
 var NOTES = {
   x: "parent-relative x (ignored inside an auto-layout parent)",

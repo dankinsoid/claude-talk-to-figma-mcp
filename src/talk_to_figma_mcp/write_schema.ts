@@ -28,7 +28,7 @@ import { Color, Paint } from "./shared-schemas.js";
 /** Node types write_nodes can create — mirrors NODE_FACTORIES + INSTANCE in code.js. */
 export const NODE_TYPES = [
   "FRAME", "TEXT", "RECTANGLE", "ELLIPSE", "LINE", "STAR", "POLYGON",
-  "VECTOR", "COMPONENT", "SECTION", "SLICE", "INSTANCE", "SVG",
+  "VECTOR", "COMPONENT", "SECTION", "SLICE", "INSTANCE", "SVG", "CODE_BLOCK",
 ] as const;
 export type NodeType = (typeof NODE_TYPES)[number];
 
