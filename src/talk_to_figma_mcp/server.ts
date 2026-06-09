@@ -178,31 +178,6 @@ async function textContent(text: string, summary: string, save: SaveArgs, baseNa
   return { type: "text" as const, text };
 }
 
-// Document Info Tool
-server.tool(
-  "get_document_info",
-  "Get detailed information about the current Figma document",
-  { ...saveParams },
-  async ({ saveToFile, outputPath }: any) => {
-    try {
-      const result = await sendCommandToFigma("get_document_info");
-      return {
-        content: [await jsonContent(result, { saveToFile, outputPath }, "document-info")]
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error getting document info: ${error instanceof Error ? error.message : String(error)
-              }`,
-          },
-        ],
-      };
-    }
-  }
-);
-
 // Selection Tool
 server.tool(
   "get_selection",
@@ -1743,7 +1718,6 @@ This detailed process ensures you correctly interpret the reaction data, prepare
 
 // Define command types and parameters
 type FigmaCommand =
-  | "get_document_info"
   | "get_selection"
   | "read_node"
   | "read_node_raw"
@@ -1769,7 +1743,6 @@ type FigmaCommand =
   | "set_selections";
 
 type CommandParams = {
-  get_document_info: Record<string, never>;
   get_selection: Record<string, never>;
   read_node: { nodeId: string };
   read_node_raw: { nodeId: string };

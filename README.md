@@ -128,7 +128,6 @@ The MCP server provides the following tools for interacting with Figma:
 
 ### Document & Selection
 
-- `get_document_info` - Get information about the current Figma document
 - `get_selection` - Get information about the current selection
 - `read_my_design` - Get detailed node information about the current selection without parameters
 - `get_node_info` - Get detailed information about a specific node
@@ -213,7 +212,7 @@ The MCP server includes several helper prompts to guide you through complex desi
 When working with the Figma MCP:
 
 1. Always join a channel before sending commands
-2. Get document overview using `get_document_info` first
+2. Get document overview using `glob_nodes` (e.g. `{depth:1}`) first
 3. Check current selection with `get_selection` before modifications
 4. Use appropriate creation tools based on needs:
    - `create_frame` for containers

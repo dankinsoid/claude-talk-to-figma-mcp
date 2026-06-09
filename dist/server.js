@@ -674,28 +674,6 @@ async function textContent(text, summary, save, baseName) {
   return { type: "text", text };
 }
 server.tool(
-  "get_document_info",
-  "Get detailed information about the current Figma document",
-  { ...saveParams },
-  async ({ saveToFile, outputPath }) => {
-    try {
-      const result = await sendCommandToFigma("get_document_info");
-      return {
-        content: [await jsonContent(result, { saveToFile, outputPath }, "document-info")]
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error getting document info: ${error instanceof Error ? error.message : String(error)}`
-          }
-        ]
-      };
-    }
-  }
-);
-server.tool(
   "get_selection",
   "Get information about the current selection in Figma",
   { ...saveParams },

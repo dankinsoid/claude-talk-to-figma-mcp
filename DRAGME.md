@@ -877,7 +877,7 @@ join_channel
 # Expected: "Successfully joined channel" message
 
 # Test 2: Figma Communication  
-get_document_info
+glob_nodes
 # Expected: JSON data from Figma document
 ```
 
@@ -895,7 +895,7 @@ get_document_info
 2. **Test End-to-End Communication**:
    ```bash
    # In Cursor chat, test these MCP commands:
-   get_document_info
+   glob_nodes
    get_selection
    ```
    - Commands should return JSON data from your Figma document
@@ -1105,7 +1105,7 @@ fi
 **Execute in Cursor with MCP connected:**
 
 1. **MCP Connection Test**: `join_channel` → Should return success message
-2. **Figma Communication Test**: `get_document_info` → Should return JSON data
+2. **Figma Communication Test**: `glob_nodes` → Should return JSON data
 3. **Plugin Status**: Figma plugin should show as connected
 
 ### 🎉 Success Criteria
@@ -1120,7 +1120,7 @@ fi
 - ✅ Figma plugin installed, configured with `ws://localhost:3055`, and connected
 - ✅ Plugin connection visible in WebSocket server logs (check `@Terminals`)
 - ✅ `join_channel` command works in Cursor
-- ✅ `get_document_info` returns Figma document data
+- ✅ `glob_nodes` returns Figma document data
 - ✅ All processes healthy and running (verified via `@Terminals`)
 
 **If any criterion fails, AI agents should follow the troubleshooting decision tree above.**

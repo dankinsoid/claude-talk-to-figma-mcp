@@ -137,8 +137,6 @@ function updateSettings(settings) {
 // Handle commands from UI
 async function handleCommand(command, params) {
   switch (command) {
-    case "get_document_info":
-      return await getDocumentInfo();
     case "get_selection":
       return await getSelection();
     case "read_node":
@@ -239,33 +237,6 @@ async function handleCommand(command, params) {
 }
 
 // Command implementations
-
-async function getDocumentInfo() {
-  await figma.currentPage.loadAsync();
-  const page = figma.currentPage;
-  return {
-    name: page.name,
-    id: page.id,
-    type: page.type,
-    children: page.children.map((node) => ({
-      id: node.id,
-      name: node.name,
-      type: node.type,
-    })),
-    currentPage: {
-      id: page.id,
-      name: page.name,
-      childCount: page.children.length,
-    },
-    pages: [
-      {
-        id: page.id,
-        name: page.name,
-        childCount: page.children.length,
-      },
-    ],
-  };
-}
 
 async function getSelection() {
   return {
