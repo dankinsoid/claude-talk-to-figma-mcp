@@ -298,6 +298,34 @@ server.tool(
   }
 );
 
+// Raw Node Info Tool
+server.tool(
+  "get_node_info_raw",
+  "Get the full, unfiltered JSON of a single node exactly as Figma serializes it (JSON_REST_V1), with all properties but with the children array stripped. Use when get_node_info's compacted view drops a property you need; large outputs auto-spill to a file.",
+  {
+    nodeId: z.string().describe("The ID of the node to get the raw JSON for"),
+    ...saveParams,
+  },
+  async ({ nodeId, saveToFile, outputPath }: any) => {
+    try {
+      const result = await sendCommandToFigma("get_node_info_raw", { nodeId });
+      return {
+        content: [await jsonContent(result, { saveToFile, outputPath }, "node-info-raw")]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error getting raw node info: ${error instanceof Error ? error.message : String(error)
+              }`,
+          },
+        ],
+      };
+    }
+  }
+);
+
 function rgbaToHex(color: any): string {
   // skip if color is already hex
   if (color.startsWith('#')) {
@@ -2689,6 +2717,7 @@ type FigmaCommand =
   | "get_document_info"
   | "get_selection"
   | "get_node_info"
+  | "get_node_info_raw"
   | "get_nodes_info"
   | "read_my_design"
   | "create_rectangle"
@@ -2731,6 +2760,7 @@ type CommandParams = {
   get_document_info: Record<string, never>;
   get_selection: Record<string, never>;
   get_node_info: { nodeId: string };
+  get_node_info_raw: { nodeId: string };
   get_nodes_info: { nodeIds: string[] };
   create_rectangle: {
     x: number;

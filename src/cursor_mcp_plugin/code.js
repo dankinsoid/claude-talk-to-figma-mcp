@@ -146,6 +146,11 @@ async function handleCommand(command, params) {
         throw new Error("Missing nodeId parameter");
       }
       return await getNodeInfo(params.nodeId);
+    case "get_node_info_raw":
+      if (!params || !params.nodeId) {
+        throw new Error("Missing nodeId parameter");
+      }
+      return await getNodeInfoRaw(params.nodeId);
     case "get_nodes_info":
       if (!params || !params.nodeIds || !Array.isArray(params.nodeIds)) {
         throw new Error("Missing or invalid nodeIds parameter");
@@ -499,6 +504,24 @@ async function getNodeInfo(nodeId) {
   });
 
   return filterFigmaNode(response.document);
+}
+
+// Full, unfiltered JSON_REST_V1 serialization of a single node, with the
+// children array stripped so the caller gets every property of just that node.
+async function getNodeInfoRaw(nodeId) {
+  const node = await figma.getNodeByIdAsync(nodeId);
+
+  if (!node) {
+    throw new Error(`Node not found with ID: ${nodeId}`);
+  }
+
+  const response = await node.exportAsync({
+    format: "JSON_REST_V1",
+  });
+
+  const document = response.document;
+  delete document.children;
+  return document;
 }
 
 async function getNodesInfo(nodeIds) {

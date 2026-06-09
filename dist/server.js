@@ -11,16 +11,6 @@ import { tmpdir } from "os";
 import { dirname, join } from "path";
 
 // src/talk_to_figma_mcp/shape.ts
-var PROFILES = {
-  skeleton: { box: false, style: false, text: false, full: false },
-  box: { box: true, style: false, text: false, full: false },
-  style: { box: true, style: true, text: false, full: false },
-  text: { box: true, style: false, text: true, full: false },
-  // auto keeps characters (always emitted) but drops font styling — what
-  // matters by default is structure, text content, and positioning, not type specs.
-  auto: { box: true, style: false, text: false, full: false },
-  full: { box: true, style: true, text: true, full: true }
-};
 var VECTOR_LEAF = /* @__PURE__ */ new Set([
   "VECTOR",
   "BOOLEAN_OPERATION",
@@ -44,33 +34,71 @@ function colorToHex(color) {
   const hex = (x) => x.toString(16).padStart(2, "0");
   return `#${hex(r)}${hex(g)}${hex(b)}${a === 255 ? "" : hex(a)}`;
 }
-function compactPaint(paint, full) {
-  const p = { type: paint.type };
-  if (paint.visible === false) p.visible = false;
-  if (paint.opacity !== void 0 && paint.opacity !== 1) p.opacity = round(paint.opacity, 2);
-  if (paint.color) p.color = colorToHex(paint.color);
+function applyAlpha(hex, opacity) {
+  let base = 255;
+  let rgb = hex;
+  if (hex.length === 9) {
+    base = parseInt(hex.slice(7, 9), 16);
+    rgb = hex.slice(0, 7);
+  }
+  const eff = Math.round(base * (opacity ?? 1));
+  if (eff >= 255) return rgb;
+  return rgb + eff.toString(16).padStart(2, "0");
+}
+function fillInfo(fills) {
+  if (!Array.isArray(fills) || !fills.length) return null;
+  let paint = null;
+  for (const p of fills) if (p && p.visible !== false) paint = p;
+  if (!paint) return null;
+  if (paint.type === "SOLID" && paint.color) {
+    return { color: applyAlpha(colorToHex(paint.color), paint.opacity) };
+  }
   if (paint.gradientStops) {
-    p.stops = paint.gradientStops.map(
-      (s) => `${colorToHex(s.color)}@${round(s.position, 2)}`
-    );
+    return { gradient: paint.gradientStops.map((s) => applyAlpha(colorToHex(s.color), paint.opacity)) };
   }
-  if (paint.scaleMode) p.scaleMode = paint.scaleMode;
-  if (full && paint.gradientHandlePositions) {
-    p.handles = paint.gradientHandlePositions.map((h) => [round(h.x, 3), round(h.y, 3)]);
+  if (paint.type === "IMAGE") return { image: true };
+  return null;
+}
+function rect(node) {
+  const b = node.absoluteBoundingBox;
+  if (!b) return null;
+  return { x1: b.x, y1: b.y, x2: b.x + b.width, y2: b.y + b.height };
+}
+function intersect(a, b) {
+  if (!a) return b;
+  return { x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1), x2: Math.min(a.x2, b.x2), y2: Math.min(a.y2, b.y2) };
+}
+function fullyOutside(clip, r) {
+  return r.x2 <= clip.x1 || r.x1 >= clip.x2 || r.y2 <= clip.y1 || r.y1 >= clip.y2;
+}
+function contains(outer, inner) {
+  return inner.x1 >= outer.x1 && inner.y1 >= outer.y1 && inner.x2 <= outer.x2 && inner.y2 <= outer.y2;
+}
+function opaqueCover(node) {
+  if (node.rotation) return false;
+  if (node.cornerRadius) return false;
+  if (node.opacity !== void 0 && node.opacity !== 1) return false;
+  const fi = node.fills && fillInfo(node.fills);
+  return !!(fi && fi.color && fi.color.length === 7);
+}
+function occludedSet(kids) {
+  const covered = /* @__PURE__ */ new Set();
+  for (let i = 0; i < kids.length; i++) {
+    const cr = rect(kids[i]);
+    if (!cr) continue;
+    for (let j = i + 1; j < kids.length; j++) {
+      const o = kids[j];
+      if (o.visible === false || !opaqueCover(o)) continue;
+      const or = rect(o);
+      if (or && contains(or, cr)) {
+        covered.add(kids[i].id);
+        break;
+      }
+    }
   }
-  return p;
+  return covered;
 }
-function compactTextStyle(s, full) {
-  const o = {};
-  if (s.fontFamily) o.font = s.fontFamily;
-  if (s.fontStyle && s.fontStyle !== "Regular") o.fontStyle = s.fontStyle;
-  if (s.fontWeight && s.fontWeight !== 400) o.weight = s.fontWeight;
-  if (s.fontSize) o.size = round(s.fontSize, 1);
-  if (s.textAlignHorizontal && s.textAlignHorizontal !== "LEFT") o.align = s.textAlignHorizontal;
-  if (s.letterSpacing) o.letterSpacing = round(s.letterSpacing, 2);
-  if (full && s.lineHeightPx) o.lineHeight = round(s.lineHeightPx, 1);
-  return o;
-}
+var NONE = /* @__PURE__ */ new Set();
 function hasNoText(node) {
   if (node.type === "TEXT") return false;
   if (node.children) return node.children.every(hasNoText);
@@ -95,7 +123,7 @@ function isIcon(node, curDepth) {
 function box(node) {
   const b = node.absoluteBoundingBox;
   if (!b) return void 0;
-  return { x: dim(b.x), y: dim(b.y), w: dim(b.width), h: dim(b.height) };
+  return [dim(b.x), dim(b.y), dim(b.width), dim(b.height)];
 }
 function stackOf(node) {
   if (node.layoutMode === "HORIZONTAL") return "h";
@@ -115,51 +143,41 @@ function axisSize(node, parent, self, dim2, px) {
   }
   return px;
 }
-function padOf(node) {
+function padArray(node) {
   const t = dim(node.paddingTop || 0);
   const r = dim(node.paddingRight || 0);
   const b = dim(node.paddingBottom || 0);
   const l = dim(node.paddingLeft || 0);
   if (!(t || r || b || l)) return void 0;
-  if (t === r && r === b && b === l) return t;
-  const o = {};
-  if (t === b && l === r) {
-    if (t) o.vertical = t;
-    if (l) o.horizontal = l;
-    return o;
-  }
-  if (t) o.top = t;
-  if (r) o.right = r;
-  if (b) o.bottom = b;
-  if (l) o.left = l;
-  return o;
+  return [l, t, r, b];
 }
-function layoutSpec(node, out, stack) {
-  if (!stack) return;
-  out.stack = stack === "h" ? "HORIZONTAL" : "VERTICAL";
-  if (node.itemSpacing) out.gap = dim(node.itemSpacing);
-  const pad = padOf(node);
-  if (pad !== void 0) out.pad = pad;
-  if (node.primaryAxisAlignItems) out.alignMain = node.primaryAxisAlignItems;
-  if (node.counterAxisAlignItems) out.alignCross = node.counterAxisAlignItems;
+function autoLayoutOf(node, stack, size) {
+  const al = { flow: stack };
+  if (node.itemSpacing) al.gap = dim(node.itemSpacing);
+  const pad = padArray(node);
+  if (pad) al.pad = pad;
+  if (node.primaryAxisAlignItems) al.alignMain = node.primaryAxisAlignItems;
+  if (node.counterAxisAlignItems) al.alignCross = node.counterAxisAlignItems;
+  if (size !== void 0) al.size = size;
+  return al;
 }
 function planRepeats(root, enabled) {
   const collapsed = /* @__PURE__ */ new Set();
-  if (!enabled) return collapsed;
-  const seen = /* @__PURE__ */ new Set();
+  const templates = /* @__PURE__ */ new Map();
+  if (!enabled) return { collapsed, templates };
   const visit = (node, isRoot) => {
     if (!isRoot && node.type === "INSTANCE" && node.componentId) {
-      if (seen.has(node.componentId)) {
+      if (templates.has(node.componentId)) {
         collapsed.add(node.id);
         return;
       }
-      seen.add(node.componentId);
+      templates.set(node.componentId, node.componentProperties);
     }
     const kids = node.children;
     if (kids) for (const c of kids) visit(c, false);
   };
   visit(root, true);
-  return collapsed;
+  return { collapsed, templates };
 }
 function compactProps(cp) {
   if (!cp || typeof cp !== "object") return void 0;
@@ -168,6 +186,16 @@ function compactProps(cp) {
     const name = key.split("#")[0];
     const v = cp[key];
     o[name] = v && typeof v === "object" && "value" in v ? v.value : v;
+  }
+  return Object.keys(o).length ? o : void 0;
+}
+function propsDiff(cp, templateCp) {
+  const cur = compactProps(cp);
+  if (!cur) return void 0;
+  const tmpl = compactProps(templateCp) || {};
+  const o = {};
+  for (const k of Object.keys(cur)) {
+    if (JSON.stringify(cur[k]) !== JSON.stringify(tmpl[k])) o[k] = cur[k];
   }
   return Object.keys(o).length ? o : void 0;
 }
@@ -182,26 +210,22 @@ function collectText(node, acc, cap) {
 }
 function planExpansion(root, opts, repeats) {
   const expand = /* @__PURE__ */ new Set([root.id]);
-  let count = 1;
   const queue = [{ node: root, depth: 0 }];
   while (queue.length) {
     const { node, depth } = queue.shift();
     if (opts.collapseIcons && isIcon(node, depth)) continue;
     if (repeats.has(node.id)) continue;
+    if (depth + 1 > opts.depth) continue;
     const kids = node.children || [];
-    if (!kids.length) continue;
-    const underCap = depth + 1 <= opts.depth;
     for (const kid of kids) {
-      count++;
-      if (count <= opts.maxNodes && underCap) {
-        expand.add(kid.id);
-        queue.push({ node: kid, depth: depth + 1 });
-      }
+      expand.add(kid.id);
+      queue.push({ node: kid, depth: depth + 1 });
     }
   }
   return expand;
 }
 function stubNode(node, collapseIcons) {
+  if (node.visible === false) return { id: node.id, hidden: true };
   const out = { id: node.id, name: node.name, type: node.type };
   if (collapseIcons && isIcon(node, 1)) out.type = "ICON";
   const b = box(node);
@@ -213,50 +237,48 @@ function stubNode(node, collapseIcons) {
   }
   return out;
 }
-function shapeRec(node, opts, f, curDepth, parent, expand, repeats) {
+function shapeRec(node, opts, curDepth, parent, expand, repeats, templates, clip) {
+  if (curDepth > 0 && node.visible === false) return { id: node.id, hidden: true };
   const out = { id: node.id, name: node.name, type: node.type };
   if (opts.collapseIcons && isIcon(node, curDepth)) {
     out.type = "ICON";
-    if (f.box) out.box = box(node);
+    const b = box(node);
+    if (b) out.box = b;
     out.more = true;
     return out;
   }
   const isRepeat = repeats.has(node.id);
   const myStack = stackOf(node);
-  if (f.box) {
-    const absolute = node.layoutPositioning === "ABSOLUTE";
-    if (parent && !absolute) {
-      const b = node.absoluteBoundingBox;
-      if (b) {
-        const w = axisSize(node, parent, myStack, "w", dim(b.width));
-        const h = axisSize(node, parent, myStack, "h", dim(b.height));
-        out.size = w === h && typeof w === "string" ? w : { w, h };
-      }
-    } else {
-      const b = box(node);
-      if (b) out.box = b;
+  const fi = node.fills && fillInfo(node.fills);
+  if (fi) {
+    if (fi.color) out.color = fi.color;
+    else if (fi.gradient) out.gradient = fi.gradient;
+    else if (fi.image) out.image = true;
+  }
+  if (node.opacity !== void 0 && node.opacity !== 1) out.opacity = round(node.opacity, 2);
+  const absolute = node.layoutPositioning === "ABSOLUTE";
+  let size = void 0;
+  if (parent && !absolute) {
+    const b = node.absoluteBoundingBox;
+    if (b) {
+      const w = axisSize(node, parent, myStack, "w", dim(b.width));
+      const h = axisSize(node, parent, myStack, "h", dim(b.height));
+      size = w === h && typeof w === "string" ? w : [w, h];
     }
   }
-  if (f.box && !isRepeat) layoutSpec(node, out, myStack);
-  if (node.cornerRadius !== void 0 && (f.style || f.box)) {
-    out.cornerRadius = round(node.cornerRadius, 1);
+  const boxArr = !parent || absolute ? box(node) : void 0;
+  if (myStack && !isRepeat) {
+    out.autoLayout = autoLayoutOf(node, myStack, size);
+    if (boxArr) out.box = boxArr;
+  } else {
+    if (size !== void 0) out.size = size;
+    if (boxArr) out.box = boxArr;
   }
-  if (f.style) {
-    if (node.fills && node.fills.length) out.fills = node.fills.map((x) => compactPaint(x, f.full));
-    if (node.strokes && node.strokes.length) {
-      out.strokes = node.strokes.map((x) => compactPaint(x, f.full));
-      if (node.strokeWeight !== void 0) out.strokeWeight = round(node.strokeWeight, 2);
-    }
-  }
-  if (node.characters !== void 0) out.characters = node.characters;
-  if (node.style && (f.text || f.style)) {
-    const ts = compactTextStyle(node.style, f.full);
-    if (Object.keys(ts).length) out.style = ts;
-  }
+  if (node.characters !== void 0) out.text = node.characters;
   const kids = node.children || [];
   if (kids.length) {
     if (isRepeat) {
-      const props = compactProps(node.componentProperties);
+      const props = propsDiff(node.componentProperties, templates.get(node.componentId));
       if (props) out.props = props;
       const texts = [];
       collectText(node, texts, 6);
@@ -264,9 +286,18 @@ function shapeRec(node, opts, f, curDepth, parent, expand, repeats) {
       out.childCount = kids.length;
       out.more = true;
     } else if (expand.has(node.id)) {
-      out.children = kids.map(
-        (c) => expand.has(c.id) ? shapeRec(c, opts, f, curDepth + 1, myStack, expand, repeats) : stubNode(c, opts.collapseIcons)
-      );
+      const myRect = rect(node);
+      const childClip = opts.cull && node.clipsContent && myRect ? intersect(clip, myRect) : clip;
+      const covered = opts.cull ? occludedSet(kids) : NONE;
+      out.children = kids.map((c) => {
+        if (c.visible === false) return { id: c.id, hidden: true };
+        if (opts.cull && childClip) {
+          const r = rect(c);
+          if (r && fullyOutside(childClip, r)) return { id: c.id, clipped: true };
+        }
+        if (covered.has(c.id)) return { id: c.id, occluded: true };
+        return expand.has(c.id) ? shapeRec(c, opts, curDepth + 1, myStack, expand, repeats, templates, childClip) : stubNode(c, opts.collapseIcons);
+      });
     } else {
       out.childCount = kids.length;
       out.more = true;
@@ -274,56 +305,16 @@ function shapeRec(node, opts, f, curDepth, parent, expand, repeats) {
   }
   return out;
 }
-function dedupe(root) {
-  const counts = /* @__PURE__ */ new Map();
-  const walk = (n2, fn) => {
-    for (const k of ["fills", "strokes"]) {
-      if (n2[k]) fn(JSON.stringify(n2[k]));
-    }
-    if (n2.children) n2.children.forEach((c) => walk(c, fn));
-  };
-  walk(root, (key) => counts.set(key, (counts.get(key) || 0) + 1));
-  const defs = {};
-  const keyFor = /* @__PURE__ */ new Map();
-  let n = 0;
-  for (const [json, count] of counts) {
-    if (count > 1) {
-      const ref = `@${++n}`;
-      keyFor.set(json, ref);
-      defs[ref] = JSON.parse(json);
-    }
-  }
-  if (n === 0) return void 0;
-  const replace = (node) => {
-    for (const k of ["fills", "strokes"]) {
-      if (node[k]) {
-        const ref = keyFor.get(JSON.stringify(node[k]));
-        if (ref) node[k] = ref;
-      }
-    }
-    if (node.children) node.children.forEach(replace);
-  };
-  replace(root);
-  return defs;
-}
 function shapeNode(node, options = {}) {
   const opts = {
-    maxNodes: options.maxNodes ?? 100,
-    depth: options.depth ?? Infinity,
-    detail: options.detail ?? "auto",
+    depth: options.depth ?? 6,
     collapseIcons: options.collapseIcons ?? true,
     collapseRepeats: options.collapseRepeats ?? true,
-    dedupe: options.dedupe ?? true
+    cull: options.cull ?? true
   };
-  const fields = PROFILES[opts.detail] ?? PROFILES.auto;
-  const repeats = planRepeats(node, opts.collapseRepeats);
-  const expand = planExpansion(node, opts, repeats);
-  const shaped = shapeRec(node, opts, fields, 0, null, expand, repeats);
-  if (opts.dedupe && fields.style) {
-    const defs = dedupe(shaped);
-    if (defs) shaped._defs = defs;
-  }
-  return shaped;
+  const { collapsed, templates } = planRepeats(node, opts.collapseRepeats);
+  const expand = planExpansion(node, opts, collapsed);
+  return shapeRec(node, opts, 0, null, expand, collapsed, templates, null);
 }
 
 // src/talk_to_figma_mcp/server.ts
@@ -367,11 +358,22 @@ async function writeOutputFile(baseName, ext, data, outputPath) {
   const bytes = typeof data === "string" ? Buffer.byteLength(data) : data.length;
   return { path: target, bytes };
 }
+var AUTO_SAVE_BYTES = 1e5;
 async function jsonContent(payload, save, baseName) {
   const text = JSON.stringify(payload);
   if (save?.saveToFile || save?.outputPath) {
     const { path, bytes } = await writeOutputFile(baseName, "json", text, save.outputPath);
     return { type: "text", text: `Saved ${bytes} bytes of JSON to ${path}` };
+  }
+  if (Buffer.byteLength(text) > AUTO_SAVE_BYTES) {
+    try {
+      const { path, bytes } = await writeOutputFile(baseName, "json", text);
+      return {
+        type: "text",
+        text: `Output too large to return inline (${bytes} bytes); saved to ${path}. Read it from there, or re-request with a lower depth to shrink the result.`
+      };
+    } catch {
+    }
   }
   return { type: "text", text };
 }
@@ -420,25 +422,21 @@ server.tool(
   }
 );
 var shapeParams = {
-  detail: z.enum(["skeleton", "box", "style", "text", "auto", "full"]).optional().describe(
-    "Detail profile. skeleton=structure only; box=+integer bounds; text=+characters & font; style=+fills/strokes/gradients; full=everything; auto (default)=structure+text+box. Text characters are always included."
-  ),
-  maxNodes: z.number().int().min(1).optional().describe("Soft node budget (default 100). The tree expands breadth-first until ~this many nodes are emitted; the rest become stubs with {childCount, more:true}. Raise to see more at once, lower for a terser overview."),
-  depth: z.number().int().min(0).optional().describe("Optional hard cap on levels of children (default: unbounded \u2014 the node budget governs). Stubbed nodes carry {childCount, more:true}; re-request that id to zoom in."),
+  depth: z.number().int().min(0).optional().describe("Levels of children below the requested node to expand (default 6). Deeper nodes become stubs with {childCount, more:true}; re-request that id to zoom in. Raise to see more at once, lower for a terser overview."),
   collapseIcons: z.boolean().optional().describe("Collapse icon-like subtrees (no text, vector leaves) to a single ICON node with more:true (default true)."),
   collapseRepeats: z.boolean().optional().describe("Collapse repeated instances of the same component: the first renders in full, later copies become a stub with their props/text and more:true (default true)."),
-  dedupe: z.boolean().optional().describe("Hoist repeated fills/strokes into a shared _defs table referenced by @N strings (default true; only applies when paints are included).")
+  cull: z.boolean().optional().describe("Drop nodes that render nowhere \u2014 fully clipped out by an ancestor's clipsContent ({id, clipped:true}) or fully covered by an opaque sibling above ({id, occluded:true}). Default true.")
 };
 server.tool(
   "read_my_design",
-  "Get information about the current selection in Figma, compacted for low token cost. Same detail/depth/collapse controls as get_node_info.",
+  "Get information about the current selection in Figma, compacted for low token cost. Same depth/collapse controls as get_node_info.",
   {
     ...shapeParams,
     ...saveParams
   },
-  async ({ detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe: dedupe2, saveToFile, outputPath }) => {
+  async ({ depth, collapseIcons, collapseRepeats, cull, saveToFile, outputPath }) => {
     try {
-      const opts = { detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe: dedupe2 };
+      const opts = { depth, collapseIcons, collapseRepeats, cull };
       const result = await sendCommandToFigma("read_my_design", {});
       const shaped = Array.isArray(result) ? result.map((r) => r && r.document ? { ...r, document: shapeNode(r.document, opts) } : r) : result;
       return {
@@ -458,16 +456,16 @@ server.tool(
 );
 server.tool(
   "get_node_info",
-  "Get information about a specific node in Figma, compacted for low token cost. Returns a structure+text view by default; widen with detail/depth to zoom in.",
+  "Get information about a specific node in Figma, compacted for low token cost. Returns a fixed minimal field set per node (id, name, type, color/gradient, opacity, box or autoLayout, text); children expand to depth 6 by default \u2014 raise depth or re-request a stub's id to zoom in.",
   {
     nodeId: z.string().describe("The ID of the node to get information about"),
     ...shapeParams,
     ...saveParams
   },
-  async ({ nodeId, detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe: dedupe2, saveToFile, outputPath }) => {
+  async ({ nodeId, depth, collapseIcons, collapseRepeats, cull, saveToFile, outputPath }) => {
     try {
       const result = await sendCommandToFigma("get_node_info", { nodeId });
-      const shaped = shapeNode(result, { detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe: dedupe2 });
+      const shaped = shapeNode(result, { depth, collapseIcons, collapseRepeats, cull });
       return {
         content: [await jsonContent(shaped, { saveToFile, outputPath }, "node-info")]
       };
@@ -484,16 +482,41 @@ server.tool(
   }
 );
 server.tool(
+  "get_node_info_raw",
+  "Get the full, unfiltered JSON of a single node exactly as Figma serializes it (JSON_REST_V1), with all properties but with the children array stripped. Use when get_node_info's compacted view drops a property you need; large outputs auto-spill to a file.",
+  {
+    nodeId: z.string().describe("The ID of the node to get the raw JSON for"),
+    ...saveParams
+  },
+  async ({ nodeId, saveToFile, outputPath }) => {
+    try {
+      const result = await sendCommandToFigma("get_node_info_raw", { nodeId });
+      return {
+        content: [await jsonContent(result, { saveToFile, outputPath }, "node-info-raw")]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error getting raw node info: ${error instanceof Error ? error.message : String(error)}`
+          }
+        ]
+      };
+    }
+  }
+);
+server.tool(
   "get_nodes_info",
-  "Get information about multiple nodes in Figma, compacted for low token cost. Same detail/depth/collapse controls as get_node_info.",
+  "Get information about multiple nodes in Figma, compacted for low token cost. Same depth/collapse controls as get_node_info.",
   {
     nodeIds: z.array(z.string()).describe("Array of node IDs to get information about"),
     ...shapeParams,
     ...saveParams
   },
-  async ({ nodeIds, detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe: dedupe2, saveToFile, outputPath }) => {
+  async ({ nodeIds, depth, collapseIcons, collapseRepeats, cull, saveToFile, outputPath }) => {
     try {
-      const opts = { detail, maxNodes, depth, collapseIcons, collapseRepeats, dedupe: dedupe2 };
+      const opts = { depth, collapseIcons, collapseRepeats, cull };
       const results = await Promise.all(
         nodeIds.map(async (nodeId) => {
           const result = await sendCommandToFigma("get_node_info", { nodeId });
