@@ -890,7 +890,62 @@ async function setWriteProp(node, key, value) {
   if (key === "fontSize" && node.type === "TEXT" && node.fontName && node.fontName !== figma.mixed) {
     await figma.loadFontAsync(node.fontName);
   }
+  // Style-id props are read-only under documentAccess:dynamic-page — bind via the
+  // async setter so the style resolves across pages (assignment throws).
+  if (STYLE_ID_SETTERS[key]) {
+    await setStyleId(node, key, value);
+    return;
+  }
+  if (key === "effects") {
+    node.effects = normalizeEffects(value);
+    return;
+  }
   node[key] = coerceColors(coerceTypedUnit(key, value));
+}
+
+// Style-id properties have no assignable setter under documentAccess:dynamic-page
+// (the manifest opts in) — Figma makes them read-only and exposes an async setter
+// that resolves the style across pages. Map each id prop to its setter.
+const STYLE_ID_SETTERS = {
+  fillStyleId: "setFillStyleIdAsync",
+  strokeStyleId: "setStrokeStyleIdAsync",
+  effectStyleId: "setEffectStyleIdAsync",
+  gridStyleId: "setGridStyleIdAsync",
+  textStyleId: "setTextStyleIdAsync",
+};
+
+async function setStyleId(node, key, value) {
+  const method = STYLE_ID_SETTERS[key];
+  if (typeof node[method] !== "function") throw new Error(`${node.type} does not support ${key}`);
+  await node[method](value == null ? "" : String(value)); // "" detaches the style
+}
+
+// Figma's Effect setters validate per-type, and the STYLE setter (style.effects)
+// is stricter than the node setter: it needs a shadow color that carries an alpha
+// channel and rejects showShadowBehindNode on effects that don't define it (only
+// DROP_SHADOW does). Normalize both paths to one well-formed shape so an effect
+// that applies to a node also applies as a style. Hex `color` is converted (with
+// alpha) like coerceColors does elsewhere.
+function normalizeEffects(effects) {
+  if (!Array.isArray(effects)) return coerceColors(effects);
+  return effects.map((e) => {
+    if (!e || typeof e !== "object") return e;
+    const out = Object.assign({}, e);
+    if (out.color !== undefined) {
+      const c = out.color;
+      if (typeof c === "string") {
+        const rgb = hexToRgb01(c);
+        if (!rgb) throw new Error(`invalid hex color "${c}" in effect`);
+        out.color = { r: rgb.r, g: rgb.g, b: rgb.b, a: typeof rgb.a === "number" ? rgb.a : 1 };
+      } else if (c && typeof c === "object") {
+        out.color = { r: c.r, g: c.g, b: c.b, a: typeof c.a === "number" ? c.a : 1 };
+      }
+    }
+    // showShadowBehindNode is a DROP_SHADOW-only field; carrying it on other
+    // effect types makes the stricter style setter throw.
+    if (out.type !== "DROP_SHADOW" && "showShadowBehindNode" in out) delete out.showShadowBehindNode;
+    return out;
+  });
 }
 
 // Figma's letterSpacing/lineHeight are {value, unit} objects — a bare number
@@ -1105,7 +1160,9 @@ async function applyStyleProps(style, spec) {
     if (spec.textCase !== undefined) style.textCase = spec.textCase;
     if (spec.textDecoration !== undefined) style.textDecoration = spec.textDecoration;
   } else if (style.type === "EFFECT") {
-    if (spec.effects !== undefined) style.effects = coerceColors(spec.effects);
+    // Same normalization node effects get, so a spec that works on a node works
+    // as a style (shadow color gets alpha, stray showShadowBehindNode dropped).
+    if (spec.effects !== undefined) style.effects = normalizeEffects(spec.effects);
   } else if (style.type === "GRID") {
     if (spec.layoutGrids !== undefined) style.layoutGrids = coerceColors(spec.layoutGrids);
   }
@@ -2589,6 +2646,15 @@ async function applyEditToNode(node, steps, newValue, oldLeaf, path) {
       const h = topKey === "height" ? Number(newValue) : node.height;
       node.resize(w, h);
       return node[topKey];
+    }
+    // Style-id binds are read-only under dynamic-page access — use the async setter.
+    if (STYLE_ID_SETTERS[topKey]) {
+      await setStyleId(node, topKey, newValue);
+      return normalizeForDisplay(resolveFieldPath(node, steps)[0]);
+    }
+    if (topKey === "effects") {
+      node.effects = normalizeEffects(newValue);
+      return normalizeForDisplay(resolveFieldPath(node, steps)[0]);
     }
     node[topKey] = convertWriteValue(newValue, oldLeaf, topKey);
     return normalizeForDisplay(resolveFieldPath(node, steps)[0]);
