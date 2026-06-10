@@ -411,8 +411,16 @@ function rgbaToHex(color) {
 }
 
 function filterFigmaNode(node) {
+  // VECTOR leaves: a minimal stub — identity + extent only, never the path
+  // geometry (an SVG paste can hold hundreds of these). The server needs the
+  // type to detect icon-like subtrees (all-vector leaves) and collapse the
+  // whole container into one ICON line; dropping vectors entirely (old
+  // behavior) left the wrapper-group matryoshka uncollapsible.
   if (node.type === "VECTOR") {
-    return null;
+    var vec = { id: node.id, name: node.name, type: node.type };
+    if (node.visible === false) vec.visible = false;
+    if (node.absoluteBoundingBox) vec.absoluteBoundingBox = node.absoluteBoundingBox;
+    return vec;
   }
 
   var filtered = {
