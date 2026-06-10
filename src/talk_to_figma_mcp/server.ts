@@ -6,7 +6,7 @@ import { z } from "zod";
 import WebSocket from "ws";
 import { v4 as uuidv4 } from "uuid";
 import { writeFile, readFile, mkdir } from "fs/promises";
-import { tmpdir } from "os";
+import { tmpdir, homedir } from "os";
 import { dirname, join } from "path";
 import { shapeNode } from "./shape.js";
 import { renumberIds, resolveShortIdsInParams } from "./idmap.js";
@@ -164,9 +164,21 @@ async function resolveExternalAssets(value: any): Promise<any> {
 }
 
 async function fetchAssetBytes(url: string): Promise<Buffer> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`fetch ${url} → HTTP ${res.status}`);
-  const buf = Buffer.from(await res.arrayBuffer());
+  // Asset fetching runs in the MCP server (on the user's machine), not in the
+  // Figma plugin sandbox — so local files can be read straight from disk, no
+  // HTTP detour needed. Accepts file:// URLs, absolute paths and ~/ paths.
+  let localPath: string | undefined;
+  if (url.startsWith("file://")) localPath = decodeURIComponent(new URL(url).pathname);
+  else if (url.startsWith("/")) localPath = url;
+  else if (url.startsWith("~/")) localPath = join(homedir(), url.slice(2));
+  let buf: Buffer;
+  if (localPath !== undefined) {
+    buf = await readFile(localPath);
+  } else {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`fetch ${url} → HTTP ${res.status}`);
+    buf = Buffer.from(await res.arrayBuffer());
+  }
   if (buf.byteLength > IMPORT_MAX_BYTES) {
     throw new Error(`asset ${url} is ${(buf.byteLength / 1024 / 1024).toFixed(1)}MB, over the ${IMPORT_MAX_BYTES / 1024 / 1024}MB import cap`);
   }
@@ -788,7 +800,7 @@ server.tool(
 // @ai-generated(solo)
 server.tool(
   "write_nodes",
-  "Create new nodes from raw Figma JSON — the create-side twin of edit_nodes, a Write tool for the node tree instead of text. Pass `nodes`: an array of node specs. Each spec is `{type, ...props, children?}`: `type` is the Figma node type to create (RECTANGLE, FRAME, TEXT, ELLIPSE, LINE, STAR, POLYGON, VECTOR, COMPONENT, SECTION, SLICE, or INSTANCE). Every OTHER key is a property written onto the new node exactly as edit_nodes writes a path — `name`, `x`, `y`, `cornerRadius`, `opacity`, `fills`, `layoutMode`, `paddingTop`, `itemSpacing`, etc. Values follow edit_nodes rules: any `color` field given as `#RRGGBB` is converted to Figma's rgb 0-1 (so `fills:[{type:\"SOLID\",color:\"#3366ff\"}]` works), `width`/`height` route through resize(), and on a TEXT node `characters` loads the node's font for you. Placement: `parentId` appends the node into an existing container (short ids n0,... or full Figma ids; default is the current page) and `index` sets its position among siblings. `children` is an array of the same spec shape, created recursively inside this node — this is how you write a whole subtree (frame → its rows → their text) in one call. Specs are INDEPENDENT like edit_nodes: a spec whose factory or parent lookup fails records its Figma error and the siblings still create; within a created node, a single bad property (e.g. padding with no layoutMode, a value Figma rejects) is reported per-property and the node still survives with its other props. INSTANCE needs `componentId` (a local COMPONENT, from get_local_components) or `componentKey` (a published library component); add `componentProperties:{PropName:value}` to pick variants / set boolean·text·swap props on the new instance (applied via setProperties). IMAGE fills: put `{type:\"IMAGE\", imageUrl:\"https://…\", scaleMode:\"FILL\"}` in `fills` — the server fetches the URL and imports the bytes into Figma for you (no imageHash needed); same works in edit_nodes when you set a node's `fills`. SVG: `type:\"SVG\"` with `svg:\"<svg…>\"` raw markup or `svgUrl:\"https://…\"` (fetched server-side) creates a vector node from the SVG. The result is a tree of `✓ <id> <TYPE> \"<name>\"` (use that id as a parentId or in edit_nodes next) or `✗ <error>`, with `! key: <error>` lines for any rejected properties. Large batches stream progress so a long run won't time out.",
+  "Create new nodes from raw Figma JSON — the create-side twin of edit_nodes, a Write tool for the node tree instead of text. Pass `nodes`: an array of node specs. Each spec is `{type, ...props, children?}`: `type` is the Figma node type to create (RECTANGLE, FRAME, TEXT, ELLIPSE, LINE, STAR, POLYGON, VECTOR, COMPONENT, SECTION, SLICE, or INSTANCE). Every OTHER key is a property written onto the new node exactly as edit_nodes writes a path — `name`, `x`, `y`, `cornerRadius`, `opacity`, `fills`, `layoutMode`, `paddingTop`, `itemSpacing`, etc. Values follow edit_nodes rules: any `color` field given as `#RRGGBB` is converted to Figma's rgb 0-1 (so `fills:[{type:\"SOLID\",color:\"#3366ff\"}]` works), `width`/`height` route through resize(), and on a TEXT node `characters` loads the node's font for you. Placement: `parentId` appends the node into an existing container (short ids n0,... or full Figma ids; default is the current page) and `index` sets its position among siblings. `children` is an array of the same spec shape, created recursively inside this node — this is how you write a whole subtree (frame → its rows → their text) in one call. Specs are INDEPENDENT like edit_nodes: a spec whose factory or parent lookup fails records its Figma error and the siblings still create; within a created node, a single bad property (e.g. padding with no layoutMode, a value Figma rejects) is reported per-property and the node still survives with its other props. INSTANCE needs `componentId` (a local COMPONENT, from get_local_components) or `componentKey` (a published library component); add `componentProperties:{PropName:value}` to pick variants / set boolean·text·swap props on the new instance (applied via setProperties). IMAGE fills: put `{type:\"IMAGE\", imageUrl:\"https://…\", scaleMode:\"FILL\"}` in `fills` — imageUrl also accepts a LOCAL FILE PATH (`/abs/path.png`, `~/pic.png` or `file://…`) read straight from disk, no need to serve files over HTTP; the server fetches/reads the source and imports the bytes into Figma for you (no imageHash needed); same works in edit_nodes when you set a node's `fills`. SVG: `type:\"SVG\"` with `svg:\"<svg…>\"` raw markup or `svgUrl:\"https://…\"` (also accepts a local path, fetched/read server-side) creates a vector node from the SVG. The result is a tree of `✓ <id> <TYPE> \"<name>\"` (use that id as a parentId or in edit_nodes next) or `✗ <error>`, with `! key: <error>` lines for any rejected properties. Large batches stream progress so a long run won't time out.",
   {
     nodes: z
       .array(z.record(z.any()))

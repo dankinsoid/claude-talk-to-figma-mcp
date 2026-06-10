@@ -24,9 +24,8 @@ export const Paint = z
     // imageUrl is present. Alternatively pass an imageHash you already have.
     imageUrl: z
       .string()
-      .url()
       .optional()
-      .describe('image fill source URL — fetched server-side and imported; implies type "IMAGE"'),
+      .describe('image fill source — https URL, file:// URL or local file path (/abs or ~/); read/fetched server-side and imported; implies type "IMAGE"'),
     imageHash: z.string().optional().describe("pre-imported Figma image hash (alternative to imageUrl)"),
     scaleMode: z
       .enum(["FILL", "FIT", "CROP", "TILE"])

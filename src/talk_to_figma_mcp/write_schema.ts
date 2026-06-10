@@ -61,7 +61,7 @@ const componentKey = z.string().optional().describe("published library component
 // SVG node (figma.createNodeFromSvg → a FRAME of vectors). Give the raw markup
 // in `svg`, OR `svgUrl` which the server fetches for you.
 const svg = z.string().optional().describe("raw SVG markup to import as a vector node");
-const svgUrl = z.string().url().optional().describe("URL of an SVG — fetched server-side, then imported");
+const svgUrl = z.string().optional().describe("SVG source — https URL or local file path (/abs, ~/ or file://); read/fetched server-side, then imported");
 // `children` is the same union, lazily referenced so the recursive type resolves.
 const children = z.array(z.lazy((): z.ZodTypeAny => writeNodeUnion)).optional().describe("nested specs, created recursively inside this node");
 
