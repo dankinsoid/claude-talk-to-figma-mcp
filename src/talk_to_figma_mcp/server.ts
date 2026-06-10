@@ -2854,8 +2854,16 @@ function connectToFigma(port: number = 3055) {
 
   ws.on('open', () => {
     logger.info('Connected to Figma socket server');
-    // Reset channel on new connection
-    currentChannel = null;
+    // Re-join the last channel so a reconnect is transparent. The plugin keeps
+    // its channel across reconnects (ui.html); the server must too, otherwise
+    // every blip forces the agent to call join_channel again to revive the session.
+    if (currentChannel) {
+      const channel = currentChannel;
+      sendCommandToFigma('join', { channel }).then(
+        () => logger.info(`Rejoined channel after reconnect: ${channel}`),
+        (err) => logger.error(`Failed to rejoin channel ${channel}: ${err instanceof Error ? err.message : String(err)}`)
+      );
+    }
   });
 
   ws.on("message", (data: any) => {
@@ -2994,6 +3002,28 @@ async function joinChannel(channelName: string): Promise<void> {
   }
 }
 
+// Wait for the socket to reach OPEN, kicking off a connect if needed. Bounded so
+// a dead relay surfaces as an error instead of hanging the command forever.
+function waitForConnection(timeoutMs: number = 10000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      resolve();
+      return;
+    }
+    connectToFigma();
+    const start = Date.now();
+    const interval = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        clearInterval(interval);
+        resolve();
+      } else if (Date.now() - start > timeoutMs) {
+        clearInterval(interval);
+        reject(new Error(`Unable to establish connection to Figma after ${timeoutMs / 1000} seconds`));
+      }
+    }, 100);
+  });
+}
+
 // Function to send commands to Figma
 function sendCommandToFigma(
   command: FigmaCommand,
@@ -3001,10 +3031,15 @@ function sendCommandToFigma(
   timeoutMs: number = 30000
 ): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    // If not connected, try to connect first
+    // Ride out an in-flight reconnect instead of failing the first call after a
+    // blip. 'join' is exempt: it is sent from the reconnect open-handler while
+    // the socket is already OPEN, so it never needs to wait (and must not recurse).
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      connectToFigma();
-      reject(new Error("Not connected to Figma. Attempting to connect..."));
+      if (command === 'join') {
+        reject(new Error('Not connected to Figma'));
+        return;
+      }
+      waitForConnection().then(() => sendCommandToFigma(command, params, timeoutMs).then(resolve, reject), reject);
       return;
     }
 

@@ -3326,7 +3326,13 @@ function connectToFigma(port = 3055) {
   ws = new import_ws.default(wsUrl);
   ws.on("open", () => {
     logger.info("Connected to Figma socket server");
-    currentChannel = null;
+    if (currentChannel) {
+      const channel = currentChannel;
+      sendCommandToFigma("join", { channel }).then(
+        () => logger.info(`Rejoined channel after reconnect: ${channel}`),
+        (err) => logger.error(`Failed to rejoin channel ${channel}: ${err instanceof Error ? err.message : String(err)}`)
+      );
+    }
   });
   ws.on("message", (data) => {
     try {
@@ -3414,11 +3420,33 @@ async function joinChannel(channelName) {
     throw error;
   }
 }
+function waitForConnection(timeoutMs = 1e4) {
+  return new Promise((resolve, reject) => {
+    if (ws && ws.readyState === import_ws.default.OPEN) {
+      resolve();
+      return;
+    }
+    connectToFigma();
+    const start = Date.now();
+    const interval = setInterval(() => {
+      if (ws && ws.readyState === import_ws.default.OPEN) {
+        clearInterval(interval);
+        resolve();
+      } else if (Date.now() - start > timeoutMs) {
+        clearInterval(interval);
+        reject(new Error(`Unable to establish connection to Figma after ${timeoutMs / 1e3} seconds`));
+      }
+    }, 100);
+  });
+}
 function sendCommandToFigma(command, params = {}, timeoutMs = 3e4) {
   return new Promise((resolve, reject) => {
     if (!ws || ws.readyState !== import_ws.default.OPEN) {
-      connectToFigma();
-      reject(new Error("Not connected to Figma. Attempting to connect..."));
+      if (command === "join") {
+        reject(new Error("Not connected to Figma"));
+        return;
+      }
+      waitForConnection().then(() => sendCommandToFigma(command, params, timeoutMs).then(resolve, reject), reject);
       return;
     }
     const requiresChannel = command !== "join";
