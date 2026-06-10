@@ -166,10 +166,16 @@ figma.ui.onmessage = async (msg) => {
           result,
         });
       } catch (error) {
+        // Figma can throw non-Error values (or Errors with an empty .message);
+        // surface .stack/String(error) so the real cause isn't masked by the
+        // generic fallback.
         figma.ui.postMessage({
           type: "command-error",
           id: msg.id,
-          error: error.message || "Error executing command",
+          error:
+            error && (error.message || error.stack)
+              ? error.message || String(error)
+              : "Error executing command: " + String(error),
         });
       }
       break;
