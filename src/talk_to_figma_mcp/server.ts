@@ -3024,11 +3024,36 @@ function waitForConnection(timeoutMs: number = 10000): Promise<void> {
   });
 }
 
+// @ai-generated(solo)
+// Relay fail-fast error when the plugin's socket is gone from the channel.
+const NO_CLIENT_ERROR_RE = /No client is connected to channel/;
+
+// The plugin restarted or its socket blipped. It auto-reconnects on a 1-2s
+// backoff (and with the stable per-file channel id it usually rejoins the
+// same channel) — poll the relay's active-channels file briefly for it to
+// reappear instead of failing the command immediately.
+async function recoverPluginChannel(): Promise<string | null> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const active = await readActiveChannels();
+    if (active.length > 0) {
+      // Prefer the channel we were already on; otherwise an unambiguous sole
+      // channel. Multiple foreign channels → can't guess, let the agent pick.
+      const same = active.find((c) => c.channel === currentChannel);
+      if (same) return same.channel;
+      if (active.length === 1) return active[0].channel;
+      return null;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 750));
+  }
+  return null;
+}
+
 // Function to send commands to Figma
 function sendCommandToFigma(
   command: FigmaCommand,
   params: unknown = {},
-  timeoutMs: number = 30000
+  timeoutMs: number = 30000,
+  isRetry: boolean = false
 ): Promise<unknown> {
   return new Promise((resolve, reject) => {
     // Ride out an in-flight reconnect instead of failing the first call after a
@@ -3085,10 +3110,39 @@ function sendCommandToFigma(
       }
     }, timeoutMs);
 
+    // Relay said nobody handles the channel — the plugin likely restarted.
+    // Re-discover its channel, rejoin if it moved, retry the command once,
+    // all transparent to the agent. Anything else rejects as before.
+    const rejectWithRecovery = (error: Error) => {
+      if (isRetry || command === "join" || !NO_CLIENT_ERROR_RE.test(error.message)) {
+        reject(error);
+        return;
+      }
+      logger.info(`Plugin missing from channel ${currentChannel}; attempting recovery...`);
+      recoverPluginChannel().then(
+        (channel) => {
+          if (!channel) {
+            reject(error);
+            return;
+          }
+          const rejoined =
+            channel !== currentChannel ? joinChannel(channel) : Promise.resolve();
+          rejoined.then(
+            () => {
+              logger.info(`Recovered plugin channel ${channel}; retrying ${command}`);
+              sendCommandToFigma(command, params, timeoutMs, true).then(resolve, reject);
+            },
+            () => reject(error)
+          );
+        },
+        () => reject(error)
+      );
+    };
+
     // Store the promise callbacks to resolve/reject later
     pendingRequests.set(id, {
       resolve,
-      reject,
+      reject: rejectWithRecovery,
       timeout,
       lastActivity: Date.now()
     });

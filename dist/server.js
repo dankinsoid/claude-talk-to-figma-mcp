@@ -3417,7 +3417,21 @@ function waitForConnection(timeoutMs = 1e4) {
     }, 100);
   });
 }
-function sendCommandToFigma(command, params = {}, timeoutMs = 3e4) {
+var NO_CLIENT_ERROR_RE = /No client is connected to channel/;
+async function recoverPluginChannel() {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const active = await readActiveChannels();
+    if (active.length > 0) {
+      const same = active.find((c) => c.channel === currentChannel);
+      if (same) return same.channel;
+      if (active.length === 1) return active[0].channel;
+      return null;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 750));
+  }
+  return null;
+}
+function sendCommandToFigma(command, params = {}, timeoutMs = 3e4, isRetry = false) {
   return new Promise((resolve, reject) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       if (command === "join") {
@@ -3460,9 +3474,33 @@ function sendCommandToFigma(command, params = {}, timeoutMs = 3e4) {
         reject(new Error("Request to Figma timed out"));
       }
     }, timeoutMs);
+    const rejectWithRecovery = (error) => {
+      if (isRetry || command === "join" || !NO_CLIENT_ERROR_RE.test(error.message)) {
+        reject(error);
+        return;
+      }
+      logger.info(`Plugin missing from channel ${currentChannel}; attempting recovery...`);
+      recoverPluginChannel().then(
+        (channel) => {
+          if (!channel) {
+            reject(error);
+            return;
+          }
+          const rejoined = channel !== currentChannel ? joinChannel(channel) : Promise.resolve();
+          rejoined.then(
+            () => {
+              logger.info(`Recovered plugin channel ${channel}; retrying ${command}`);
+              sendCommandToFigma(command, params, timeoutMs, true).then(resolve, reject);
+            },
+            () => reject(error)
+          );
+        },
+        () => reject(error)
+      );
+    };
     pendingRequests.set(id, {
       resolve,
-      reject,
+      reject: rejectWithRecovery,
       timeout,
       lastActivity: Date.now()
     });

@@ -120,8 +120,46 @@ function getFileInfo() {
   };
 }
 
-function sendFileInfo() {
-  figma.ui.postMessage({ type: "file-info", info: getFileInfo() });
+// @ai-generated(solo)
+// Stable channel id: a per-file part persisted in the document (pluginData)
+// plus a per-machine part (clientStorage). A plugin restart/crash rejoins the
+// same channel, so the agent's joined channel stays valid; collaborators
+// opening the same file still land in distinct channels via the machine part.
+// Returns null when the document is read-only (e.g. Dev Mode) — the UI then
+// falls back to a throwaway random channel.
+async function getStableChannelId() {
+  try {
+    let fileId = figma.root.getPluginData("mcpChannelId");
+    if (!fileId) {
+      fileId = randomChannelPart(8);
+      figma.root.setPluginData("mcpChannelId", fileId);
+    }
+    let machineId = await figma.clientStorage.getAsync("mcpChannelSuffix");
+    if (!machineId) {
+      machineId = randomChannelPart(4);
+      await figma.clientStorage.setAsync("mcpChannelSuffix", machineId);
+    }
+    return fileId + "-" + machineId;
+  } catch (error) {
+    return null;
+  }
+}
+
+function randomChannelPart(length) {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  let out = "";
+  for (let i = 0; i < length; i++) {
+    out += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return out;
+}
+
+async function sendFileInfo() {
+  figma.ui.postMessage({
+    type: "file-info",
+    info: getFileInfo(),
+    channel: await getStableChannelId(),
+  });
 }
 
 // Push fresh context when the user renames the file or switches pages so the
