@@ -9,7 +9,7 @@ import { writeFile, readFile, mkdir } from "fs/promises";
 import { tmpdir, homedir } from "os";
 import { dirname, join } from "path";
 import { shapeNode } from "./shape.js";
-import { renumberIds, resolveShortIdsInParams } from "./idmap.js";
+import { renumberIds, resolveShortIdsInParams, setIdMapNamespace } from "./idmap.js";
 import { writeNodeUnion, describeNodeSchema, listNodeTypes, validateEditValue, NODE_TYPES, type NodeType } from "./write_schema.js";
 
 // Define TypeScript interfaces for Figma responses
@@ -3007,6 +3007,9 @@ async function joinChannel(channelName: string): Promise<void> {
   try {
     await sendCommandToFigma("join", { channel: channelName });
     currentChannel = channelName;
+    // The channel id is stable per file+machine, so it doubles as the short-id
+    // namespace key: switching files swaps in that file's persisted map.
+    setIdMapNamespace(channelName);
     logger.info(`Joined channel: ${channelName}`);
   } catch (error) {
     logger.error(`Failed to join channel: ${error instanceof Error ? error.message : String(error)}`);

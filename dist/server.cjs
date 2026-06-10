@@ -29,8 +29,8 @@ var import_zod4 = require("zod");
 var import_ws = __toESM(require("ws"), 1);
 var import_uuid = require("uuid");
 var import_promises = require("fs/promises");
-var import_os = require("os");
-var import_path = require("path");
+var import_os2 = require("os");
+var import_path2 = require("path");
 
 // src/talk_to_figma_mcp/shape.ts
 var VECTOR_LEAF = /* @__PURE__ */ new Set([
@@ -331,10 +331,90 @@ function shapeNode(node, options = {}) {
 }
 
 // src/talk_to_figma_mcp/idmap.ts
+var import_fs = require("fs");
+var import_path = require("path");
+var import_os = require("os");
+var DIR = (0, import_path.join)((0, import_os.tmpdir)(), "talk-to-figma", "idmap");
+var TTL_MS = 48 * 60 * 60 * 1e3;
+var FLUSH_DELAY_MS = 250;
 var shortToFull = /* @__PURE__ */ new Map();
 var fullToShort = /* @__PURE__ */ new Map();
 var counter = 0;
+var filePath = null;
+var flushTimer = null;
 var SHORT_RE = /^n\d+$/;
+function fileFor(channel) {
+  return (0, import_path.join)(DIR, channel.replace(/[^\w.-]/g, "_") + ".json");
+}
+function setIdMapNamespace(channel) {
+  const next = fileFor(channel);
+  if (filePath === next) return;
+  flushNow();
+  filePath = next;
+  shortToFull = /* @__PURE__ */ new Map();
+  fullToShort = /* @__PURE__ */ new Map();
+  counter = 0;
+  try {
+    const data = JSON.parse((0, import_fs.readFileSync)(filePath, "utf8"));
+    if (data && typeof data.counter === "number" && data.ids) {
+      counter = data.counter;
+      for (const [full, s] of Object.entries(data.ids)) {
+        fullToShort.set(full, s);
+        shortToFull.set(s, full);
+      }
+    }
+  } catch {
+  }
+  pruneExpired();
+}
+function pruneExpired() {
+  try {
+    const cutoff = Date.now() - TTL_MS;
+    for (const name of (0, import_fs.readdirSync)(DIR)) {
+      const p = (0, import_path.join)(DIR, name);
+      if (p === filePath || !name.endsWith(".json")) continue;
+      try {
+        if ((0, import_fs.statSync)(p).mtimeMs < cutoff) (0, import_fs.unlinkSync)(p);
+      } catch {
+      }
+    }
+  } catch {
+  }
+}
+function scheduleFlush() {
+  if (!filePath || flushTimer) return;
+  flushTimer = setTimeout(flushNow, FLUSH_DELAY_MS);
+}
+function flushNow() {
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  if (!filePath) return;
+  try {
+    (0, import_fs.mkdirSync)(DIR, { recursive: true });
+    try {
+      const disk = JSON.parse((0, import_fs.readFileSync)(filePath, "utf8"));
+      if (disk && disk.ids) {
+        for (const [full, s] of Object.entries(disk.ids)) {
+          if (!fullToShort.has(full) && !shortToFull.has(s)) {
+            fullToShort.set(full, s);
+            shortToFull.set(s, full);
+          }
+        }
+        if (typeof disk.counter === "number" && disk.counter > counter) counter = disk.counter;
+      }
+    } catch {
+    }
+    const ids = {};
+    for (const [full, s] of fullToShort) ids[full] = s;
+    const tmp = `${filePath}.${process.pid}.tmp`;
+    (0, import_fs.writeFileSync)(tmp, JSON.stringify({ counter, ids }));
+    (0, import_fs.renameSync)(tmp, filePath);
+  } catch {
+  }
+}
+process.on("exit", flushNow);
 function shorten(fullId) {
   if (SHORT_RE.test(fullId)) return fullId;
   let s = fullToShort.get(fullId);
@@ -342,6 +422,7 @@ function shorten(fullId) {
     s = "n" + counter++;
     fullToShort.set(fullId, s);
     shortToFull.set(s, fullId);
+    scheduleFlush();
   }
   return s;
 }
@@ -365,7 +446,7 @@ function resolveOne(id) {
   const full = shortToFull.get(id);
   if (!full) {
     throw new Error(
-      `Unknown short id "${id}" \u2014 re-fetch the node; short ids reset when the MCP server restarts.`
+      `Unknown short id "${id}" \u2014 re-fetch the node; this id is not in the current file's map (expired or from another document).`
     );
   }
   return full;
@@ -1355,7 +1436,7 @@ async function fetchAssetBytes(url) {
   let localPath;
   if (url.startsWith("file://")) localPath = decodeURIComponent(new URL(url).pathname);
   else if (url.startsWith("/")) localPath = url;
-  else if (url.startsWith("~/")) localPath = (0, import_path.join)((0, import_os.homedir)(), url.slice(2));
+  else if (url.startsWith("~/")) localPath = (0, import_path2.join)((0, import_os2.homedir)(), url.slice(2));
   let buf;
   if (localPath !== void 0) {
     buf = await (0, import_promises.readFile)(localPath);
@@ -1377,8 +1458,8 @@ async function fetchAssetText(url) {
 }
 async function writeOutputFile(baseName, ext, data, outputPath) {
   const safeBase = baseName.replace(/[^a-zA-Z0-9_-]/g, "-");
-  const target = outputPath ? outputPath : (0, import_path.join)((0, import_os.tmpdir)(), "talk-to-figma", `${safeBase}-${Date.now()}-${outputFileSeq++}.${ext}`);
-  await (0, import_promises.mkdir)((0, import_path.dirname)(target), { recursive: true });
+  const target = outputPath ? outputPath : (0, import_path2.join)((0, import_os2.tmpdir)(), "talk-to-figma", `${safeBase}-${Date.now()}-${outputFileSeq++}.${ext}`);
+  await (0, import_promises.mkdir)((0, import_path2.dirname)(target), { recursive: true });
   await (0, import_promises.writeFile)(target, data);
   const bytes = typeof data === "string" ? Buffer.byteLength(data) : data.length;
   return { path: target, bytes };
@@ -1934,7 +2015,7 @@ server.tool(
           }
           const safeId = nodeId.replace(/[^a-zA-Z0-9_-]/g, "-");
           const baseName = `export-${safeId}@${img.scale}x`;
-          const target = outputDir ? (0, import_path.join)(outputDir, `${baseName}.${ext}`) : void 0;
+          const target = outputDir ? (0, import_path2.join)(outputDir, `${baseName}.${ext}`) : void 0;
           const { path, bytes } = await writeOutputFile(baseName, ext, buffer, target);
           const note = inline && !inlineable ? " (file: inline unsupported for this format)" : inline ? " (file: too large to inline)" : "";
           written.push(`${nodeId} @${img.scale}x \u2192 ${path} (${bytes} bytes)${note}`);
@@ -3423,6 +3504,7 @@ async function joinChannel(channelName) {
   try {
     await sendCommandToFigma("join", { channel: channelName });
     currentChannel = channelName;
+    setIdMapNamespace(channelName);
     logger.info(`Joined channel: ${channelName}`);
   } catch (error) {
     logger.error(`Failed to join channel: ${error instanceof Error ? error.message : String(error)}`);
@@ -3540,7 +3622,7 @@ function sendCommandToFigma(command, params = {}, timeoutMs = 3e4, isRetry = fal
     ws.send(JSON.stringify(request));
   });
 }
-var ACTIVE_CHANNELS_FILE = (0, import_path.join)((0, import_os.tmpdir)(), "figma-active-channels.json");
+var ACTIVE_CHANNELS_FILE = (0, import_path2.join)((0, import_os2.tmpdir)(), "figma-active-channels.json");
 async function readActiveChannels() {
   try {
     const raw = await (0, import_promises.readFile)(ACTIVE_CHANNELS_FILE, "utf8");
