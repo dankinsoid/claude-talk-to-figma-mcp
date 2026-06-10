@@ -2332,7 +2332,13 @@ function resolveFieldPath(node, steps) {
         } else if (step.index != null) {
           if (Array.isArray(cur) && step.index < cur.length) next.push(cur[step.index]);
         } else {
-          const v = cur[step.key];
+          let v = cur[step.key];
+          // FigJam sticky/shape/connector keep text props on a `.text` sublayer —
+          // fall through so reads (and edit `old` guards) see them at the top level,
+          // matching where setWriteProp/applyEditToNode write them.
+          if (v === undefined && cur.type && TEXT_SUBLAYER_TYPES.has(cur.type) && TEXT_SUBLAYER_KEYS.has(step.key) && cur.text) {
+            v = cur.text[step.key];
+          }
           if (v !== undefined) next.push(v);
         }
       } catch (e) {
@@ -2701,6 +2707,12 @@ async function applyEditToNode(node, steps, newValue, oldLeaf, path) {
   }
 
   if (steps.length === 1) {
+    // FigJam sticky/shape/connector: text-ish props live on node.text, not the
+    // node — mirror the write_nodes routing (setWriteProp).
+    if (TEXT_SUBLAYER_TYPES.has(node.type) && TEXT_SUBLAYER_KEYS.has(topKey)) {
+      await setSublayerTextProp(node.text, topKey, newValue);
+      return normalizeForDisplay(node.text[topKey]);
+    }
     if (topKey === "characters") {
       if (node.type !== "TEXT") throw new Error(`characters can only be set on TEXT nodes, not ${node.type}`);
       await figma.loadFontAsync(node.fontName); // throws on mixed fonts — surfaced to the agent
