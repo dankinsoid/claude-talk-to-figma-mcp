@@ -336,7 +336,8 @@ var import_path = require("path");
 var import_os = require("os");
 var DIR = (0, import_path.join)((0, import_os.tmpdir)(), "talk-to-figma", "idmap");
 var TTL_MS = 48 * 60 * 60 * 1e3;
-var FLUSH_DELAY_MS = 250;
+var FLUSH_DELAY_MS = 0;
+var COUNTER_GAP = 100;
 var shortToFull = /* @__PURE__ */ new Map();
 var fullToShort = /* @__PURE__ */ new Map();
 var counter = 0;
@@ -357,7 +358,7 @@ function setIdMapNamespace(channel) {
   try {
     const data = JSON.parse((0, import_fs.readFileSync)(filePath, "utf8"));
     if (data && typeof data.counter === "number" && data.ids) {
-      counter = data.counter;
+      counter = data.counter + COUNTER_GAP;
       for (const [full, s] of Object.entries(data.ids)) {
         fullToShort.set(full, s);
         shortToFull.set(s, full);
@@ -415,6 +416,12 @@ function flushNow() {
   }
 }
 process.on("exit", flushNow);
+for (const sig of ["SIGINT", "SIGTERM"]) {
+  process.on(sig, () => {
+    flushNow();
+    process.exit(sig === "SIGINT" ? 130 : 143);
+  });
+}
 function shorten(fullId) {
   if (SHORT_RE.test(fullId)) return fullId;
   let s = fullToShort.get(fullId);

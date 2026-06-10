@@ -27,7 +27,15 @@ import { tmpdir } from "os";
 
 const DIR = join(tmpdir(), "talk-to-figma", "idmap");
 const TTL_MS = 48 * 60 * 60 * 1000;
-const FLUSH_DELAY_MS = 250;
+// Next-tick, not a real delay: renumberIds assigns a whole read's ids in one
+// synchronous burst, so a 0ms timer still coalesces them into a single write
+// while shrinking the lose-on-kill window to ~nothing.
+const FLUSH_DELAY_MS = 0;
+// On load the counter skips ahead so short ids minted after the last flush of
+// a killed process (SIGKILL/crash — flush handlers can't run) are never
+// reassigned to different nodes: a stale id from the agent's context then
+// fails loudly in resolveOne instead of silently resolving to the wrong node.
+const COUNTER_GAP = 100;
 
 let shortToFull = new Map<string, string>();
 let fullToShort = new Map<string, string>();
@@ -59,7 +67,7 @@ export function setIdMapNamespace(channel: string): void {
   try {
     const data = JSON.parse(readFileSync(filePath, "utf8"));
     if (data && typeof data.counter === "number" && data.ids) {
-      counter = data.counter;
+      counter = data.counter + COUNTER_GAP;
       for (const [full, s] of Object.entries(data.ids as Record<string, string>)) {
         fullToShort.set(full, s);
         shortToFull.set(s, full);
@@ -133,8 +141,16 @@ function flushNow(): void {
   }
 }
 
-// Catch entries created in the last FLUSH_DELAY_MS before shutdown.
+// Catch entries created in the last FLUSH_DELAY_MS before shutdown. 'exit'
+// covers graceful exits only; signals don't emit it under default handling,
+// and the MCP host stops servers via SIGTERM — handle both explicitly.
 process.on("exit", flushNow);
+for (const sig of ["SIGINT", "SIGTERM"] as const) {
+  process.on(sig, () => {
+    flushNow();
+    process.exit(sig === "SIGINT" ? 130 : 143);
+  });
+}
 
 function shorten(fullId: string): string {
   if (SHORT_RE.test(fullId)) return fullId; // already short — keep renumberIds idempotent
