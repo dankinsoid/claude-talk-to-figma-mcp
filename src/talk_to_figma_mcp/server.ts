@@ -335,20 +335,20 @@ function fmtNodeRef(id: string, name: string, type: string): string {
 // when no ids are given. Compact subtree by default, full node props with raw.
 server.tool(
   "read_node",
-  "Read Figma nodes — the Read tool for the canvas. Pass `nodeIds` (one or many); omit it to read the current selection. Returns one entry per node. Default (compact) gives each node's subtree in a minimal, low-token field set (id, name, type, color/gradient, opacity, box or autoLayout, text); children expand to `depth` levels and deeper nodes become {childCount, more:true} stubs — re-request a stub's id or raise depth to zoom in. Each requested node also carries `ancestors`: a root-first breadcrumb (page → ... → immediate parent) of `id:\"name\".TYPE` tokens (same form as glob lines) so you know what contains it without a separate glob — those ids are short counters too, so pass one back to zoom OUT. Set `raw:true` for the full, unfiltered JSON_REST_V1 of each node with ALL properties but the children array stripped (use when the compact view drops a field you need); in raw mode depth/collapse/cull are ignored — raw is always one node, all props, no children. Large outputs auto-spill to a file. Node ids are short counters (n0, n1, ...) standing in for canonical Figma ids — pass them to any tool. Locate ids with glob_nodes/grep_nodes first, then read_node to inspect properties.",
+  "Read Figma nodes — the Read tool for the canvas. Pass `nodeIds` (one or many); omit it to read the current selection. Returns one entry per node. The `fields` param picks what each node carries: \"auto\" (DEFAULT) gives a minimal, low-token compact subtree (id, name, type, color/gradient, opacity, box or autoLayout, text); \"all\" gives every JSON_REST_V1 property; or pass an array of field paths (e.g. [\"fills\",\"effects\",\"absoluteBoundingBox\"]) to get back just those — path syntax is query_nodes' (dot/[i]/[*]) resolved against the raw JSON, returned flat-keyed by path with id/name/type always included. In \"auto\", children expand to `depth` levels (default 6) and deeper nodes become {childCount, more:true} stubs; re-request a stub's id or raise depth to zoom in, and each requested node carries an `ancestors` breadcrumb (root-first `id:\"name\".TYPE` tokens, same as glob lines — pass one back to zoom OUT). For \"all\" and field-array modes `depth` defaults to 0 (the node alone, no children); raise it to recurse with the same field selection (boundary children collapse to {childCount, more:true}); collapse/cull and the ancestors breadcrumb apply to \"auto\" only. Use \"all\" or a field array when the compact view drops a field you need. Large outputs auto-spill to a file. Node ids are short counters (n0, n1, ...) standing in for canonical Figma ids — pass them to any tool. Locate ids with glob_nodes/grep_nodes first, then read_node to inspect properties.",
   {
     nodeIds: z
       .array(z.string())
       .optional()
       .describe("Node ids to read (short n0,... or canonical). Omit to read the current selection."),
-    raw: z
-      .boolean()
+    fields: z
+      .union([z.literal("auto"), z.literal("all"), z.array(z.string())])
       .optional()
-      .describe("Return each node's full unfiltered props (children stripped) instead of the compact subtree. Ignores depth/collapse/cull. Default false."),
+      .describe("What to return per node: \"auto\" (default) = compact low-token subtree; \"all\" = every JSON_REST_V1 property; string[] = only those field paths (query_nodes path syntax, flat-keyed by path, id/name/type always kept). For \"all\"/array modes `depth` controls children (default 0)."),
     ...shapeParams,
     ...saveParams,
   },
-  async ({ nodeIds, raw, depth, collapseIcons, collapseRepeats, cull, saveToFile, outputPath }: any) => {
+  async ({ nodeIds, fields, depth, collapseIcons, collapseRepeats, cull, saveToFile, outputPath }: any) => {
     try {
       // Resolve targets: explicit ids, else fall back to the current selection.
       let ids: string[] = Array.isArray(nodeIds) ? nodeIds : [];
@@ -362,13 +362,17 @@ server.tool(
         };
       }
 
-      if (raw) {
-        // Raw keeps canonical Figma ids untouched; echo the requested id so the
-        // agent sees the short->canonical mapping instead of an unexplained swap.
+      // "all" or a field-path array routes through the raw export (single node
+      // per request, children gated by depth). Only "auto" uses the compact
+      // shaper below. Raw keeps canonical Figma ids untouched; echo the
+      // requested id so the agent sees the short->canonical mapping.
+      const mode = fields == null ? "auto" : fields;
+      if (mode !== "auto") {
+        const rawDepth = depth ?? 0;
         const nodes = await Promise.all(
           ids.map(async (nodeId) => ({
             requestedId: nodeId,
-            node: await sendCommandToFigma("read_node_raw", { nodeId }),
+            node: await sendCommandToFigma("read_node_raw", { nodeId, fields: mode, depth: rawDepth }),
           }))
         );
         return {
@@ -2668,7 +2672,7 @@ type FigmaCommand =
 type CommandParams = {
   get_selection: Record<string, never>;
   read_node: { nodeId: string };
-  read_node_raw: { nodeId: string };
+  read_node_raw: { nodeId: string; fields?: "all" | string[]; depth?: number };
   write_nodes: {
     nodes: Array<Record<string, any>>;
   };

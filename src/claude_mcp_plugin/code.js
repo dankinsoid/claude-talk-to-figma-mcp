@@ -250,7 +250,7 @@ async function handleCommand(command, params) {
       if (!params || !params.nodeId) {
         throw new Error("Missing nodeId parameter");
       }
-      return await readNodeRaw(params.nodeId);
+      return await readNodeRaw(params.nodeId, params.fields, params.depth);
     case "write_nodes":
       return await writeNodes(params);
     case "edit_nodes":
@@ -605,27 +605,98 @@ async function readNode(nodeId) {
   return filtered;
 }
 
-// Full, unfiltered JSON_REST_V1 serialization of a single node, with the
-// children array stripped so the caller gets every property of just that node.
-async function readNodeRaw(nodeId) {
+// Resolve a parsed field path against PLAIN exported JSON (not a live node),
+// branching at [*]. Mirrors resolveFieldPath but for inert objects — no Figma
+// getters that can throw and no figma.mixed sentinel to worry about.
+function resolveJsonPath(obj, steps) {
+  let current = [obj];
+  for (const step of steps) {
+    const next = [];
+    for (const cur of current) {
+      if (cur == null) continue;
+      if (step.wild) {
+        if (Array.isArray(cur)) for (const el of cur) next.push(el);
+      } else if (step.index != null) {
+        if (Array.isArray(cur) && step.index < cur.length) next.push(cur[step.index]);
+      } else {
+        const v = cur[step.key];
+        if (v !== undefined) next.push(v);
+      }
+    }
+    current = next;
+  }
+  return current;
+}
+
+// Project a raw document node down to id/name/type plus the requested field
+// paths, flat-keyed by the path string. Absent paths are omitted; a path with
+// [*] keeps the full array of matches, otherwise the single resolved value.
+function projectFields(doc, fields) {
+  const out = {};
+  for (const k of ["id", "name", "type"]) if (doc[k] !== undefined) out[k] = doc[k];
+  for (const path of fields) {
+    const steps = parseFieldPath(path);
+    const vals = resolveJsonPath(doc, steps);
+    if (!vals.length) continue;
+    out[path] = steps.some((s) => s.wild) ? vals : vals[0];
+  }
+  return out;
+}
+
+// Shape a raw JSON_REST_V1 subtree for read_node's "all"/fixed modes. `fields`
+// is "all" (keep every property) or an array of paths (project to those).
+// `depth` levels of children are kept; at the boundary a node keeps its own
+// props but its children collapse to a {childCount, more:true} stub (same
+// drill-in convention as the compact view). depth 0 = the node alone.
+function shapeRaw(doc, fields, depth) {
+  const kids = Array.isArray(doc.children) ? doc.children : null;
+  let node;
+  if (fields === "all") {
+    node = doc;
+    delete node.children;
+  } else {
+    node = projectFields(doc, fields);
+  }
+  if (kids) {
+    if (depth > 0) {
+      node.children = kids.map((c) => shapeRaw(c, fields, depth - 1));
+    } else {
+      node.childCount = kids.length;
+      node.more = true;
+    }
+  }
+  return node;
+}
+
+// Read a node's properties from its JSON_REST_V1 export. `fields` selects the
+// shape: "all" returns every property, an array of paths returns just those
+// (see shapeRaw/projectFields). `depth` controls how many child levels come
+// back (default 0 = node only). Children carry the same field selection.
+async function readNodeRaw(nodeId, fields, depth) {
   const node = await figma.getNodeByIdAsync(nodeId);
 
   if (!node) {
     throw new Error(`Node not found with ID: ${nodeId}`);
   }
 
+  if (fields == null) fields = "all";
+
   const response = await node.exportAsync({
     format: "JSON_REST_V1",
   });
 
-  const document = response.document;
-  delete document.children;
+  const document = shapeRaw(response.document, fields, depth || 0);
 
   // JSON_REST_V1 encodes per-range text styling as characterStyleOverrides +
   // styleOverrideTable, which is painful to map back to character ranges. Attach
   // the clean live segments (each a [start,end) run with its resolved style) so
-  // the agent can see what to target with style_text_range.
-  if (node.type === "TEXT") {
+  // the agent can see what to target with style_text_range. Root TEXT node only
+  // — getStyledTextSegments needs the live node; to see a child's runs request
+  // it by id. Skipped in fixed mode unless styledTextSegments is asked for.
+  const wantSegments =
+    fields === "all" ||
+    (Array.isArray(fields) && fields.some((f) => f === "styledTextSegments" || f.startsWith("styledTextSegments")));
+  if (node.type === "TEXT" && wantSegments) {
     try {
       document.styledTextSegments = node.getStyledTextSegments([
         "fontName",
