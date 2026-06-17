@@ -836,11 +836,13 @@ async function writeNodes(params) {
 
   const counts = { created: 0, total: 0 };
   const totalExpected = countSpecNodes(nodes);
-  // minItems:3 — skip framing for tiny creates; the reporter throttles the
-  // per-node ticks emitted from inside the recursion (see createOneNode).
+  // minItems:0 — stream for ANY create count so the first `start()` lifts the
+  // server off its 30s floor even for a single slow node (font load / image
+  // import); the reporter throttles the per-node ticks emitted from inside the
+  // recursion (see createOneNode), so a tiny call just emits start+done.
   const progress = makeProgress("write_nodes", totalExpected, {
     commandId: params && params.commandId,
-    minItems: 3,
+    minItems: 0,
   });
   await progress.start(`Creating ${totalExpected} nodes...`);
 
@@ -2518,13 +2520,16 @@ async function editNodes(params) {
   const results = [];
   let applied = 0;
 
-  // Long batches (many font loads / array reassigns) can exceed the 30s command
-  // timeout. The reporter streams progress whose updates reset the server's
-  // inactivity timer; small interactive edits (<=5) skip framing.
+  // Even a small batch can exceed the 30s command timeout — a single
+  // `characters` edit may block on a slow loadFontAsync, a variant swap can
+  // trigger heavy relayout. The reporter streams progress whose first `start()`
+  // alone lifts the server timeout off the 30s floor and whose ticks keep
+  // resetting the inactivity timer. minItems:0 → stream for ANY edit count
+  // (the per-item ticks stay throttled, so a tiny call just emits start+done).
   const total = edits.length;
   const progress = makeProgress("edit_nodes", total, {
     commandId: params && params.commandId,
-    minItems: 5,
+    minItems: 0,
   });
   await progress.start(`Applying ${total} edits...`);
 

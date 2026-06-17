@@ -3445,7 +3445,7 @@ function connectToFigma(port = 3055) {
               pendingRequests.delete(requestId);
               request.reject(new Error("Request to Figma timed out"));
             }
-          }, 6e4);
+          }, 12e4);
           logger.info(`Progress update for ${progressData.commandType}: ${progressData.progress}% - ${progressData.message}`);
           if (progressData.status === "completed" && progressData.progress === 100) {
             logger.info(`Operation ${progressData.commandType} completed, waiting for final result`);

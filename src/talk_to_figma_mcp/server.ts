@@ -2919,14 +2919,19 @@ function connectToFigma(port: number = 3055) {
           // Reset the timeout to prevent timeouts during long-running operations
           clearTimeout(request.timeout);
 
-          // Create a new timeout
+          // Create a new timeout. The window must outlast the slowest SINGLE
+          // item a batch can stall on (one `characters` edit blocking on
+          // loadFontAsync, a variant swap forcing relayout) — progress only
+          // resets this timer BETWEEN items, never during one. 60s was too
+          // tight for such items; 120s gives headroom without masking a true
+          // plugin hang for unboundedly long.
           request.timeout = setTimeout(() => {
             if (pendingRequests.has(requestId)) {
               logger.error(`Request ${requestId} timed out after extended period of inactivity`);
               pendingRequests.delete(requestId);
               request.reject(new Error('Request to Figma timed out'));
             }
-          }, 60000); // 60 second timeout for inactivity
+          }, 120000); // 120s inactivity window between progress updates
 
           // Log progress
           logger.info(`Progress update for ${progressData.commandType}: ${progressData.progress}% - ${progressData.message}`);

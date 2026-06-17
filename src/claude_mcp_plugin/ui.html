@@ -985,7 +985,14 @@
 
         console.log("Sending progress update to server:", progressData);
 
-        const requestId = state.activeRequestId || progressData.commandId;
+        // commandId is the authoritative per-command id (the server sets
+        // commandId === the request's id and the plugin threads it through
+        // every progress message). Prefer it over activeRequestId, which is a
+        // single mutable global overwritten by the latest incoming command and
+        // never cleared — under any command overlap it would tag this progress
+        // with the wrong id, so the real request's inactivity timer never
+        // resets and it times out mid-run.
+        const requestId = progressData.commandId || state.activeRequestId;
         state.socket.send(
           JSON.stringify({
             id: requestId,
