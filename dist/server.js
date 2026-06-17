@@ -1199,6 +1199,61 @@ var FIELD_OVERRIDES = {
   letterSpacing: pixelsOrUnit,
   lineHeight: z3.union([pixelsOrUnit, z3.object({ unit: z3.literal("AUTO") }).passthrough()])
 };
+var FIELD_ALIASES = {
+  borderRadius: "cornerRadius",
+  radius: "cornerRadius",
+  rotate: "rotation",
+  angle: "rotation",
+  w: "width",
+  h: "height",
+  text: "characters",
+  textContent: "characters",
+  gap: "itemSpacing",
+  spacing: "itemSpacing"
+};
+var FIELD_REDIRECTS = {
+  backgroundColor: 'use fills:[{type:"SOLID",color:"#RRGGBB"}]',
+  background: 'use fills:[{type:"SOLID",color:"#RRGGBB"}]',
+  bg: 'use fills:[{type:"SOLID",color:"#RRGGBB"}]',
+  fill: 'use fills (plural): [{type:"SOLID",color:"#RRGGBB"}]',
+  color: 'use fills:[{type:"SOLID",color:"#RRGGBB"}] (or fills[0].color on edit)',
+  border: 'use strokes:[{type:"SOLID",color:"#RRGGBB"}] + strokeWeight',
+  borderColor: 'use strokes:[{type:"SOLID",color:"#RRGGBB"}]',
+  stroke: 'use strokes (plural): [{type:"SOLID",color:"#RRGGBB"}]',
+  borderWidth: "use strokeWeight",
+  padding: "use paddingTop/paddingRight/paddingBottom/paddingLeft",
+  fontFamily: "use fontName:{family,style} on a TEXT node",
+  fontWeight: 'use fontName:{family,style} (e.g. style:"Bold")',
+  fontStyle: "use fontName:{family,style}",
+  flexDirection: 'use layoutMode:"HORIZONTAL"|"VERTICAL"',
+  direction: 'use layoutMode:"HORIZONTAL"|"VERTICAL"',
+  justifyContent: "use primaryAxisAlignItems:MIN|CENTER|MAX|SPACE_BETWEEN",
+  alignItems: "use counterAxisAlignItems:MIN|CENTER|MAX|BASELINE",
+  hidden: "use visible (boolean, inverted)",
+  zIndex: "use reparent_nodes `index` for z-order"
+};
+function normalizeWriteSpec(spec, notes = []) {
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) return notes;
+  for (const alias of Object.keys(spec)) {
+    const canon = FIELD_ALIASES[alias];
+    if (canon && !(canon in spec)) {
+      spec[canon] = spec[alias];
+      delete spec[alias];
+      notes.push(`${alias}\u2192${canon}`);
+    }
+  }
+  if (typeof spec.color === "string" && !("fills" in spec)) {
+    spec.fills = [{ type: "SOLID", color: spec.color }];
+    delete spec.color;
+    notes.push("color\u2192fills");
+  }
+  if (Array.isArray(spec.children)) for (const c of spec.children) normalizeWriteSpec(c, notes);
+  return notes;
+}
+function aliasPath(path) {
+  const canon = /^[A-Za-z_$][\w$]*$/.test(path) ? FIELD_ALIASES[path] : void 0;
+  return canon ? { path: canon, note: `${path}\u2192${canon}` } : { path, note: null };
+}
 var READ_ONLY_KEYS = {
   style: "REST read-format; on write use fontName {family,style} + fontSize on a TEXT node",
   absoluteBoundingBox: "read-only; use x/y + width/height",
@@ -1249,6 +1304,8 @@ function rejectReadOnly(spec, ctx) {
   for (const key of Object.keys(spec)) {
     if (key in READ_ONLY_KEYS) {
       ctx.addIssue({ code: z3.ZodIssueCode.custom, message: READ_ONLY_KEYS[key], path: [key] });
+    } else if (key in FIELD_REDIRECTS) {
+      ctx.addIssue({ code: z3.ZodIssueCode.custom, message: FIELD_REDIRECTS[key], path: [key] });
     }
   }
 }
@@ -1349,6 +1406,7 @@ function validateEditValue(path, value) {
   const segs = path.replace(/\[(\d+)\]/g, ".$1").split(".").filter(Boolean);
   if (!segs.length) return null;
   if (segs[0] in READ_ONLY_KEYS) return READ_ONLY_KEYS[segs[0]];
+  if (segs.length === 1 && segs[0] in FIELD_REDIRECTS) return FIELD_REDIRECTS[segs[0]];
   const endsWithIndex = /^\d+$/.test(segs[segs.length - 1]);
   const leaf = [...segs].reverse().find((s) => !/^\d+$/.test(s));
   if (!leaf) return null;
@@ -1779,7 +1837,15 @@ server.tool(
           content: [{ type: "text", text: "No nodes to read: no nodeIds given and the selection is empty." }]
         };
       }
-      const mode = fields == null ? "auto" : fields;
+      let mode = fields == null ? "auto" : fields;
+      const aliasNotes = [];
+      if (Array.isArray(mode)) {
+        mode = mode.map((p) => {
+          const { path, note } = aliasPath(p);
+          if (note) aliasNotes.push(note);
+          return path;
+        });
+      }
       if (mode !== "auto") {
         const rawDepth = depth ?? 0;
         const nodes = await Promise.all(
@@ -1788,9 +1854,9 @@ server.tool(
             node: await sendCommandToFigma("read_node_raw", { nodeId, fields: mode, depth: rawDepth })
           }))
         );
-        return {
-          content: [await jsonContent(nodes, { saveToFile, outputPath }, "node-raw")]
-        };
+        const content = [await jsonContent(nodes, { saveToFile, outputPath }, "node-raw")];
+        if (aliasNotes.length) content.unshift({ type: "text", text: `(auto-corrected fields: ${[...new Set(aliasNotes)].join(", ")})` });
+        return { content };
       }
       const opts = { depth, collapseIcons, collapseRepeats, cull };
       const infos = await Promise.all(
@@ -2008,7 +2074,11 @@ server.tool(
     try {
       const valid = [];
       const rejected = [];
-      for (const e of edits) {
+      const aliasNotes = [];
+      for (const raw of edits) {
+        const { path, note } = aliasPath(raw.path);
+        const e = note ? { ...raw, path } : raw;
+        if (note) aliasNotes.push(note);
         const msg = validateEditValue(e.path, e.new);
         if (msg) rejected.push(`\u2717 ${e.nodeId} ${e.path}: ${msg}`);
         else valid.push(e);
@@ -2023,6 +2093,7 @@ server.tool(
           return r.ok ? `\u2713 ${id} ${r.path}: ${fmt(r.old)} \u2192 ${fmt(r.new)}` : `\u2717 ${id} ${r.path}: ${r.error}`;
         })
       ];
+      if (aliasNotes.length) rows.push(`(auto-corrected fields: ${[...new Set(aliasNotes)].join(", ")})`);
       const text = `applied ${result?.applied || 0}/${edits.length}` + (rows.length ? "\n" + rows.join("\n") : "");
       return { content: [{ type: "text", text }] };
     } catch (error) {
@@ -2083,7 +2154,10 @@ server.tool(
     try {
       const valid = [];
       const rejected = [];
+      const aliasNotes = [];
       for (const spec of nodes) {
+        const notes = normalizeWriteSpec(spec);
+        if (notes.length) aliasNotes.push(...notes);
         const parsed = writeNodeUnion.safeParse(spec);
         if (parsed.success) {
           valid.push(spec);
@@ -2109,6 +2183,10 @@ server.tool(
         }
       };
       walk(result?.results || [], 0);
+      if (aliasNotes.length) {
+        const uniq = [...new Set(aliasNotes)];
+        lines.push(`(auto-corrected fields: ${uniq.join(", ")})`);
+      }
       const text = `created ${result?.created || 0}/${nodes.length}` + (lines.length ? "\n" + lines.join("\n") : "");
       return { content: [{ type: "text", text }] };
     } catch (error) {

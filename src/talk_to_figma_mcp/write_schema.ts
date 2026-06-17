@@ -94,6 +94,97 @@ const FIELD_OVERRIDES: Record<string, z.ZodTypeAny> = {
   lineHeight: z.union([pixelsOrUnit, z.object({ unit: z.literal("AUTO") }).passthrough()]),
 };
 
+// ── predictable field-name hallucinations ────────────────────────────────────
+//
+// Agents reach for CSS/React names for Figma properties. Two distinct fixes:
+//
+//   FIELD_ALIASES (class A) — a wrong NAME for a value of the SAME shape. We
+//     rewrite the key to the canonical one and report the swap, so the call
+//     succeeds and the agent still sees what it got wrong. Only TRULY pure
+//     renames belong here: anything that also changes the value shape (object
+//     vs scalar) or inverts it must NOT be auto-applied.
+//
+//   FIELD_REDIRECTS (class B) — a wrong name AND a different value shape, where
+//     guessing the transform risks a plausible-but-wrong result. We reject with
+//     a message in the agent's own grammar (like READ_ONLY_KEYS), pointing at
+//     the real field, and let the agent rewrite it.
+//
+// The one exception we DO auto-convert is the unambiguous color→fills case,
+// handled in normalizeWriteSpec (a bare hex has exactly one sane paint form).
+
+/** Class-A pure renames: alias → canonical field. Value shape is identical. */
+export const FIELD_ALIASES: Record<string, string> = {
+  borderRadius: "cornerRadius",
+  radius: "cornerRadius",
+  rotate: "rotation",
+  angle: "rotation",
+  w: "width",
+  h: "height",
+  text: "characters",
+  textContent: "characters",
+  gap: "itemSpacing",
+  spacing: "itemSpacing",
+};
+
+/** Class-B redirects: wrong name + different value shape. Rejected with this hint. */
+export const FIELD_REDIRECTS: Record<string, string> = {
+  backgroundColor: 'use fills:[{type:"SOLID",color:"#RRGGBB"}]',
+  background: 'use fills:[{type:"SOLID",color:"#RRGGBB"}]',
+  bg: 'use fills:[{type:"SOLID",color:"#RRGGBB"}]',
+  fill: 'use fills (plural): [{type:"SOLID",color:"#RRGGBB"}]',
+  color: 'use fills:[{type:"SOLID",color:"#RRGGBB"}] (or fills[0].color on edit)',
+  border: 'use strokes:[{type:"SOLID",color:"#RRGGBB"}] + strokeWeight',
+  borderColor: 'use strokes:[{type:"SOLID",color:"#RRGGBB"}]',
+  stroke: 'use strokes (plural): [{type:"SOLID",color:"#RRGGBB"}]',
+  borderWidth: "use strokeWeight",
+  padding: "use paddingTop/paddingRight/paddingBottom/paddingLeft",
+  fontFamily: 'use fontName:{family,style} on a TEXT node',
+  fontWeight: 'use fontName:{family,style} (e.g. style:"Bold")',
+  fontStyle: "use fontName:{family,style}",
+  flexDirection: 'use layoutMode:"HORIZONTAL"|"VERTICAL"',
+  direction: 'use layoutMode:"HORIZONTAL"|"VERTICAL"',
+  justifyContent: "use primaryAxisAlignItems:MIN|CENTER|MAX|SPACE_BETWEEN",
+  alignItems: "use counterAxisAlignItems:MIN|CENTER|MAX|BASELINE",
+  hidden: "use visible (boolean, inverted)",
+  zIndex: "use reparent_nodes `index` for z-order",
+};
+
+/**
+ * Normalize a write_nodes spec tree IN PLACE before validation: apply class-A
+ * renames and the unambiguous color→fills convert, recursing into `children`.
+ * Returns the list of substitutions (e.g. "borderRadius→cornerRadius") so the
+ * tool can surface them. Class-B redirects are left for the validation gate.
+ */
+export function normalizeWriteSpec(spec: any, notes: string[] = []): string[] {
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) return notes;
+  for (const alias of Object.keys(spec)) {
+    const canon = FIELD_ALIASES[alias];
+    if (canon && !(canon in spec)) {
+      spec[canon] = spec[alias];
+      delete spec[alias];
+      notes.push(`${alias}→${canon}`);
+    }
+  }
+  // Unambiguous color→fills: a bare hex string has exactly one sane paint form.
+  // (Only when `fills` isn't already set, so we never clobber an explicit paint.)
+  if (typeof spec.color === "string" && !("fills" in spec)) {
+    spec.fills = [{ type: "SOLID", color: spec.color }];
+    delete spec.color;
+    notes.push("color→fills");
+  }
+  if (Array.isArray(spec.children)) for (const c of spec.children) normalizeWriteSpec(c, notes);
+  return notes;
+}
+
+/**
+ * Apply a class-A alias to a single-segment edit/read field path. Nested paths
+ * (containing `.`/`[i]`) are returned unchanged — the alias map is node-level.
+ */
+export function aliasPath(path: string): { path: string; note: string | null } {
+  const canon = /^[A-Za-z_$][\w$]*$/.test(path) ? FIELD_ALIASES[path] : undefined;
+  return canon ? { path: canon, note: `${path}→${canon}` } : { path, note: null };
+}
+
 // Keys that are read-only or read-format-only — surfaced as a clear redirect
 // rather than silently no-opping when an agent pastes a read result into write.
 export const READ_ONLY_KEYS: Record<string, string> = {
@@ -152,6 +243,8 @@ function rejectReadOnly(spec: Record<string, unknown>, ctx: z.RefinementCtx): vo
   for (const key of Object.keys(spec)) {
     if (key in READ_ONLY_KEYS) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: READ_ONLY_KEYS[key], path: [key] });
+    } else if (key in FIELD_REDIRECTS) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: FIELD_REDIRECTS[key], path: [key] });
     }
   }
 }
@@ -281,6 +374,9 @@ export function validateEditValue(path: string, value: unknown): string | null {
   const segs = path.replace(/\[(\d+)\]/g, ".$1").split(".").filter(Boolean);
   if (!segs.length) return null;
   if (segs[0] in READ_ONLY_KEYS) return READ_ONLY_KEYS[segs[0]];
+  // Class-B redirect only when the bad name is the WHOLE path — `fills[0].color`
+  // is a legit nested write, but a top-level `color`/`background` is the mistake.
+  if (segs.length === 1 && segs[0] in FIELD_REDIRECTS) return FIELD_REDIRECTS[segs[0]];
 
   const endsWithIndex = /^\d+$/.test(segs[segs.length - 1]);
   const leaf = [...segs].reverse().find((s) => !/^\d+$/.test(s));

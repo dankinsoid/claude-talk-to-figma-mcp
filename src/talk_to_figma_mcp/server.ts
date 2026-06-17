@@ -10,7 +10,7 @@ import { tmpdir, homedir } from "os";
 import { dirname, join } from "path";
 import { shapeNode } from "./shape.js";
 import { renumberIds, resolveShortIdsInParams, setIdMapNamespace } from "./idmap.js";
-import { writeNodeUnion, describeNodeSchema, listNodeTypes, validateEditValue, NODE_TYPES, type NodeType } from "./write_schema.js";
+import { writeNodeUnion, describeNodeSchema, listNodeTypes, validateEditValue, normalizeWriteSpec, aliasPath, NODE_TYPES, type NodeType } from "./write_schema.js";
 import { startRelay } from "../socket";
 
 // Define TypeScript interfaces for Figma responses
@@ -366,7 +366,18 @@ server.tool(
       // per request, children gated by depth). Only "auto" uses the compact
       // shaper below. Raw keeps canonical Figma ids untouched; echo the
       // requested id so the agent sees the short->canonical mapping.
-      const mode = fields == null ? "auto" : fields;
+      let mode = fields == null ? "auto" : fields;
+      const aliasNotes: string[] = [];
+      // Auto-correct class-A field-name hallucinations in a requested field list
+      // (e.g. ["radius","text"] → ["cornerRadius","characters"]) so the agent
+      // gets the data instead of an empty result, and learns the real names.
+      if (Array.isArray(mode)) {
+        mode = mode.map((p: string) => {
+          const { path, note } = aliasPath(p);
+          if (note) aliasNotes.push(note);
+          return path;
+        });
+      }
       if (mode !== "auto") {
         const rawDepth = depth ?? 0;
         const nodes = await Promise.all(
@@ -375,9 +386,9 @@ server.tool(
             node: await sendCommandToFigma("read_node_raw", { nodeId, fields: mode, depth: rawDepth }),
           }))
         );
-        return {
-          content: [await jsonContent(nodes, { saveToFile, outputPath }, "node-raw")],
-        };
+        const content: any[] = [await jsonContent(nodes, { saveToFile, outputPath }, "node-raw")];
+        if (aliasNotes.length) content.unshift({ type: "text", text: `(auto-corrected fields: ${[...new Set(aliasNotes)].join(", ")})` });
+        return { content };
       }
 
       const opts: ShapeArgs = { depth, collapseIcons, collapseRepeats, cull };
@@ -708,7 +719,13 @@ server.tool(
       // independent): a rejected edit is reported, the rest still apply.
       const valid: any[] = [];
       const rejected: string[] = [];
-      for (const e of edits as any[]) {
+      const aliasNotes: string[] = [];
+      for (const raw of edits as any[]) {
+        // Auto-correct a class-A field-name hallucination in the path before
+        // validating/sending (e.g. {path:"borderRadius"} → "cornerRadius").
+        const { path, note } = aliasPath(raw.path);
+        const e = note ? { ...raw, path } : raw;
+        if (note) aliasNotes.push(note);
         const msg = validateEditValue(e.path, e.new);
         if (msg) rejected.push(`✗ ${e.nodeId} ${e.path}: ${msg}`);
         else valid.push(e);
@@ -734,6 +751,7 @@ server.tool(
             : `✗ ${id} ${r.path}: ${r.error}`;
         }),
       ];
+      if (aliasNotes.length) rows.push(`(auto-corrected fields: ${[...new Set(aliasNotes)].join(", ")})`);
       const text = `applied ${result?.applied || 0}/${edits.length}` + (rows.length ? "\n" + rows.join("\n") : "");
       return { content: [{ type: "text", text }] };
     } catch (error) {
@@ -820,7 +838,12 @@ server.tool(
       // independence guarantee — one bad root is rejected, valid siblings still create.
       const valid: any[] = [];
       const rejected: string[] = [];
+      const aliasNotes: string[] = [];
       for (const spec of nodes as any[]) {
+        // Auto-correct predictable field-name hallucinations (class A + color)
+        // in place before validation, so the canonical keys are what we check.
+        const notes = normalizeWriteSpec(spec);
+        if (notes.length) aliasNotes.push(...notes);
         const parsed = writeNodeUnion.safeParse(spec);
         if (parsed.success) {
           valid.push(spec);
@@ -852,6 +875,12 @@ server.tool(
         }
       };
       walk(result?.results || [], 0);
+      // Report the field-name substitutions we applied so the agent learns the
+      // canonical names (deduped — the same alias often recurs across a subtree).
+      if (aliasNotes.length) {
+        const uniq = [...new Set(aliasNotes)];
+        lines.push(`(auto-corrected fields: ${uniq.join(", ")})`);
+      }
       const text = `created ${result?.created || 0}/${nodes.length}` + (lines.length ? "\n" + lines.join("\n") : "");
       return { content: [{ type: "text", text }] };
     } catch (error) {
