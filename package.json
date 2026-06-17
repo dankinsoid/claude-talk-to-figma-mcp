@@ -1,7 +1,7 @@
 {
   "name": "@dankinsoid/claude-talk-to-figma-mcp",
   "description": "Claude Talk to Figma MCP",
-  "version": "0.3.16",
+  "version": "0.3.17",
   "publishConfig": {
     "access": "public"
   },
