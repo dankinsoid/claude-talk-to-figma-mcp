@@ -2148,18 +2148,18 @@ server.tool(
 );
 server.tool(
   "clone_node",
-  "Clone existing nodes in place \u2014 one or many in one call. Each clone is a deep copy (the whole subtree) that lands in the SAME parent as its source (use reparent_nodes to move it elsewhere). Pass `clones`: an array of `{nodeId, x?, y?}` (short ids n0,... or full Figma ids; `x`/`y` set the clone's position WITHIN that parent \u2014 local coords, ignored inside an auto-layout parent \u2014 omit to leave it stacked on the source). A single `nodeId`/`x`/`y` is also accepted. Clones are INDEPENDENT \u2014 one failing (node not found, type that can't be positioned) records its error and the rest still clone. To vary text/props per clone afterwards, run edit_nodes on the returned ids. To create many component INSTANCES (optionally at different spots with different variant/text props), prefer write_nodes with INSTANCE specs instead \u2014 no source node or follow-up edit needed. Result: `\u2713 <id> \"<name>\"` or `\u2717 <error>` per clone; large batches stream progress.",
+  'Clone existing nodes \u2014 one or many in one call. Each clone is a deep copy that lands next to its source (same parent; use reparent_nodes to move it). Clones are independent \u2014 one failing records its error, the rest still clone. To vary text/props per clone, follow with edit_nodes on the returned ids; to create many component INSTANCES at different spots with different variant/text props, prefer write_nodes with INSTANCE specs instead. Result: `\u2713 <id> "<name>"` or `\u2717 <error>` per clone.',
   {
-    nodeId: import_zod4.z.string().optional().describe("Source node id (single form). Short ids n0,... or full Figma ids."),
-    x: import_zod4.z.number().optional().describe("Absolute X for the clone (single form)."),
-    y: import_zod4.z.number().optional().describe("Absolute Y for the clone (single form)."),
+    nodeId: import_zod4.z.string().optional().describe("Source node id, single form. Short ids n0,... or full Figma ids."),
+    x: import_zod4.z.number().optional().describe("Absolute canvas X (single form)."),
+    y: import_zod4.z.number().optional().describe("Absolute canvas Y (single form)."),
     clones: import_zod4.z.array(
       import_zod4.z.object({
         nodeId: import_zod4.z.string().describe("Source node id (short n0,... or full Figma id)."),
-        x: import_zod4.z.number().optional().describe("Absolute X for the clone."),
-        y: import_zod4.z.number().optional().describe("Absolute Y for the clone.")
+        x: import_zod4.z.number().optional().describe("Absolute canvas X, as glob_nodes reports. Ignored if the parent is auto-layout; omit to stack on the source."),
+        y: import_zod4.z.number().optional().describe("Absolute canvas Y.")
       })
-    ).min(1).optional().describe("Batch form: clone specs. Independent \u2014 one failing does not abort the rest.")
+    ).min(1).optional().describe("Batch form: one `{nodeId, x?, y?}` per clone.")
   },
   async ({ nodeId, x, y, clones }) => {
     try {

@@ -886,22 +886,22 @@ server.tool(
 // Clone Node Tool
 server.tool(
   "clone_node",
-  "Clone existing nodes in place — one or many in one call. Each clone is a deep copy (the whole subtree) that lands in the SAME parent as its source (use reparent_nodes to move it elsewhere). Pass `clones`: an array of `{nodeId, x?, y?}` (short ids n0,... or full Figma ids; `x`/`y` set the clone's position WITHIN that parent — local coords, ignored inside an auto-layout parent — omit to leave it stacked on the source). A single `nodeId`/`x`/`y` is also accepted. Clones are INDEPENDENT — one failing (node not found, type that can't be positioned) records its error and the rest still clone. To vary text/props per clone afterwards, run edit_nodes on the returned ids. To create many component INSTANCES (optionally at different spots with different variant/text props), prefer write_nodes with INSTANCE specs instead — no source node or follow-up edit needed. Result: `✓ <id> \"<name>\"` or `✗ <error>` per clone; large batches stream progress.",
+  "Clone existing nodes — one or many in one call. Each clone is a deep copy that lands next to its source (same parent; use reparent_nodes to move it). Clones are independent — one failing records its error, the rest still clone. To vary text/props per clone, follow with edit_nodes on the returned ids; to create many component INSTANCES at different spots with different variant/text props, prefer write_nodes with INSTANCE specs instead. Result: `✓ <id> \"<name>\"` or `✗ <error>` per clone.",
   {
-    nodeId: z.string().optional().describe("Source node id (single form). Short ids n0,... or full Figma ids."),
-    x: z.number().optional().describe("Absolute X for the clone (single form)."),
-    y: z.number().optional().describe("Absolute Y for the clone (single form)."),
+    nodeId: z.string().optional().describe("Source node id, single form. Short ids n0,... or full Figma ids."),
+    x: z.number().optional().describe("Absolute canvas X (single form)."),
+    y: z.number().optional().describe("Absolute canvas Y (single form)."),
     clones: z
       .array(
         z.object({
           nodeId: z.string().describe("Source node id (short n0,... or full Figma id)."),
-          x: z.number().optional().describe("Absolute X for the clone."),
-          y: z.number().optional().describe("Absolute Y for the clone."),
+          x: z.number().optional().describe("Absolute canvas X, as glob_nodes reports. Ignored if the parent is auto-layout; omit to stack on the source."),
+          y: z.number().optional().describe("Absolute canvas Y."),
         })
       )
       .min(1)
       .optional()
-      .describe("Batch form: clone specs. Independent — one failing does not abort the rest."),
+      .describe("Batch form: one `{nodeId, x?, y?}` per clone."),
   },
   async ({ nodeId, x, y, clones }: any) => {
     try {

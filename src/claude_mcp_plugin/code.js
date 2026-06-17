@@ -1823,16 +1823,20 @@ async function cloneNode(params) {
 
       const clone = node.clone();
 
+      // Place the clone in the same parent as its source.
+      (node.parent || figma.currentPage).appendChild(clone);
+
+      // x/y are ABSOLUTE canvas coords. Figma's clone.x/y are parent-local, so
+      // convert via the clone's current absoluteTransform translation (which
+      // already folds in the parent's offset). No-op inside an auto-layout parent.
       if (spec.x !== undefined && spec.y !== undefined) {
         if (!("x" in clone) || !("y" in clone)) {
           throw new Error(`Cloned node does not support position: ${spec.nodeId}`);
         }
-        clone.x = spec.x;
-        clone.y = spec.y;
+        const t = clone.absoluteTransform;
+        clone.x += spec.x - t[0][2];
+        clone.y += spec.y - t[1][2];
       }
-
-      // Place the clone in the same parent as its source.
-      (node.parent || figma.currentPage).appendChild(clone);
 
       results.push({
         ok: true,
