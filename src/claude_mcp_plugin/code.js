@@ -1792,46 +1792,66 @@ const setCharactersWithSmartMatchFont = async (
   return true;
 };
 
-// Add the cloneNode function implementation
+// Clone one or many nodes. The server sends the batch shape `{clones:[{nodeId,x?,y?}]}`;
+// the single `{nodeId,x?,y?}` shape is still honored for back-compat with an older server.
 async function cloneNode(params) {
-  const { nodeId, x, y } = params || {};
+  params = params || {};
 
-  if (!nodeId) {
-    throw new Error("Missing nodeId parameter");
-  }
-
-  const node = await figma.getNodeByIdAsync(nodeId);
-  if (!node) {
-    throw new Error(`Node not found with ID: ${nodeId}`);
-  }
-
-  // Clone the node
-  const clone = node.clone();
-
-  // If x and y are provided, move the clone to that position
-  if (x !== undefined && y !== undefined) {
-    if (!("x" in clone) || !("y" in clone)) {
-      throw new Error(`Cloned node does not support position: ${nodeId}`);
-    }
-    clone.x = x;
-    clone.y = y;
-  }
-
-  // Add the clone to the same parent as the original node
-  if (node.parent) {
-    node.parent.appendChild(clone);
+  let specs;
+  if (Array.isArray(params.clones) && params.clones.length) {
+    specs = params.clones;
+  } else if (params.nodeId) {
+    specs = [{ nodeId: params.nodeId, x: params.x, y: params.y }];
   } else {
-    figma.currentPage.appendChild(clone);
+    throw new Error("clone_node requires `nodeId` or a non-empty `clones` array");
   }
 
-  return {
-    id: clone.id,
-    name: clone.name,
-    x: "x" in clone ? clone.x : undefined,
-    y: "y" in clone ? clone.y : undefined,
-    width: "width" in clone ? clone.width : undefined,
-    height: "height" in clone ? clone.height : undefined,
-  };
+  const progress = makeProgress("clone_node", specs.length, {
+    commandId: params.commandId,
+    minItems: 0,
+  });
+  await progress.start(`Cloning ${specs.length} nodes...`);
+
+  const results = [];
+  let cloned = 0;
+  for (let i = 0; i < specs.length; i++) {
+    const spec = specs[i] || {};
+    try {
+      if (!spec.nodeId) throw new Error("Missing nodeId");
+      const node = await figma.getNodeByIdAsync(spec.nodeId);
+      if (!node) throw new Error(`Node not found with ID: ${spec.nodeId}`);
+
+      const clone = node.clone();
+
+      if (spec.x !== undefined && spec.y !== undefined) {
+        if (!("x" in clone) || !("y" in clone)) {
+          throw new Error(`Cloned node does not support position: ${spec.nodeId}`);
+        }
+        clone.x = spec.x;
+        clone.y = spec.y;
+      }
+
+      // Place the clone in the same parent as its source.
+      (node.parent || figma.currentPage).appendChild(clone);
+
+      results.push({
+        ok: true,
+        id: clone.id,
+        name: clone.name,
+        x: "x" in clone ? clone.x : undefined,
+        y: "y" in clone ? clone.y : undefined,
+        width: "width" in clone ? clone.width : undefined,
+        height: "height" in clone ? clone.height : undefined,
+      });
+      cloned++;
+    } catch (e) {
+      results.push({ ok: false, nodeId: spec.nodeId, error: e instanceof Error ? e.message : String(e) });
+    }
+    await progress.tick(i + 1, `Cloned ${cloned}/${specs.length}`);
+  }
+
+  await progress.done(`Done: ${cloned} clones created`);
+  return { cloned, total: specs.length, results };
 }
 
 // Function to generate simple UUIDs for command IDs

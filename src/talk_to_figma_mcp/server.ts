@@ -886,32 +886,48 @@ server.tool(
 // Clone Node Tool
 server.tool(
   "clone_node",
-  "Clone an existing node in Figma",
+  "Clone existing nodes in place — one or many in one call. Each clone is a deep copy (the whole subtree) placed in the SAME parent as its source. Pass `clones`: an array of `{nodeId, x?, y?}` (short ids n0,... or full Figma ids; `x`/`y` set the clone's absolute position, omit to leave it stacked on the source). A single `nodeId`/`x`/`y` is also accepted. Clones are INDEPENDENT — one failing (node not found, type that can't be positioned) records its error and the rest still clone. To vary text/props per clone afterwards, run edit_nodes on the returned ids. To create many component INSTANCES (optionally at different spots with different variant/text props), prefer write_nodes with INSTANCE specs instead — no source node or follow-up edit needed. Result: `✓ <id> \"<name>\"` or `✗ <error>` per clone; large batches stream progress.",
   {
-    nodeId: z.string().describe("The ID of the node to clone"),
-    x: z.number().optional().describe("New X position for the clone"),
-    y: z.number().optional().describe("New Y position for the clone")
+    nodeId: z.string().optional().describe("Source node id (single form). Short ids n0,... or full Figma ids."),
+    x: z.number().optional().describe("Absolute X for the clone (single form)."),
+    y: z.number().optional().describe("Absolute Y for the clone (single form)."),
+    clones: z
+      .array(
+        z.object({
+          nodeId: z.string().describe("Source node id (short n0,... or full Figma id)."),
+          x: z.number().optional().describe("Absolute X for the clone."),
+          y: z.number().optional().describe("Absolute Y for the clone."),
+        })
+      )
+      .min(1)
+      .optional()
+      .describe("Batch form: clone specs. Independent — one failing does not abort the rest."),
   },
-  async ({ nodeId, x, y }: any) => {
+  async ({ nodeId, x, y, clones }: any) => {
     try {
-      const result = await sendCommandToFigma('clone_node', { nodeId, x, y });
-      const typedResult = result as { name: string, id: string };
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Cloned node "${typedResult.name}" with new ID: ${typedResult.id}${x !== undefined && y !== undefined ? ` at position (${x}, ${y})` : ''}`
-          }
-        ]
-      };
+      const specs = Array.isArray(clones) && clones.length
+        ? clones
+        : nodeId
+          ? [{ nodeId, x, y }]
+          : [];
+      if (!specs.length) {
+        return { content: [{ type: "text", text: "Error cloning node: provide `nodeId` (single) or a non-empty `clones` array (batch)" }] };
+      }
+      const result: any = await sendCommandToFigma("clone_node", { clones: specs });
+      const renumber = (id: string) => renumberIds({ id }).id;
+      const lines = (result?.results || []).map((r: any) =>
+        r.ok ? `✓ ${renumber(r.id)} "${r.name}"` : `✗ ${r.nodeId ? renumber(r.nodeId) + ": " : ""}${r.error}`
+      );
+      const text = `cloned ${result?.cloned ?? 0}/${result?.total ?? specs.length}` + (lines.length ? "\n" + lines.join("\n") : "");
+      return { content: [{ type: "text", text }] };
     } catch (error) {
       return {
         content: [
           {
             type: "text",
-            text: `Error cloning node: ${error instanceof Error ? error.message : String(error)}`
-          }
-        ]
+            text: `Error cloning node: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
       };
     }
   }
@@ -2683,9 +2699,11 @@ type CommandParams = {
     channel: string;
   };
   clone_node: {
-    nodeId: string;
-    x?: number;
-    y?: number;
+    clones: Array<{
+      nodeId: string;
+      x?: number;
+      y?: number;
+    }>;
   };
   get_annotations: {
     nodeId?: string;

@@ -2134,24 +2134,32 @@ server.tool(
 );
 server.tool(
   "clone_node",
-  "Clone an existing node in Figma",
+  "Clone existing nodes in place \u2014 one or many in one call. Each clone is a deep copy (the whole subtree) placed in the SAME parent as its source. Pass `clones`: an array of `{nodeId, x?, y?}` (short ids n0,... or full Figma ids; `x`/`y` set the clone's absolute position, omit to leave it stacked on the source). A single `nodeId`/`x`/`y` is also accepted. Clones are INDEPENDENT \u2014 one failing (node not found, type that can't be positioned) records its error and the rest still clone. To vary text/props per clone afterwards, run edit_nodes on the returned ids. To create many component INSTANCES (optionally at different spots with different variant/text props), prefer write_nodes with INSTANCE specs instead \u2014 no source node or follow-up edit needed. Result: `\u2713 <id> \"<name>\"` or `\u2717 <error>` per clone; large batches stream progress.",
   {
-    nodeId: z4.string().describe("The ID of the node to clone"),
-    x: z4.number().optional().describe("New X position for the clone"),
-    y: z4.number().optional().describe("New Y position for the clone")
+    nodeId: z4.string().optional().describe("Source node id (single form). Short ids n0,... or full Figma ids."),
+    x: z4.number().optional().describe("Absolute X for the clone (single form)."),
+    y: z4.number().optional().describe("Absolute Y for the clone (single form)."),
+    clones: z4.array(
+      z4.object({
+        nodeId: z4.string().describe("Source node id (short n0,... or full Figma id)."),
+        x: z4.number().optional().describe("Absolute X for the clone."),
+        y: z4.number().optional().describe("Absolute Y for the clone.")
+      })
+    ).min(1).optional().describe("Batch form: clone specs. Independent \u2014 one failing does not abort the rest.")
   },
-  async ({ nodeId, x, y }) => {
+  async ({ nodeId, x, y, clones }) => {
     try {
-      const result = await sendCommandToFigma("clone_node", { nodeId, x, y });
-      const typedResult = result;
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Cloned node "${typedResult.name}" with new ID: ${typedResult.id}${x !== void 0 && y !== void 0 ? ` at position (${x}, ${y})` : ""}`
-          }
-        ]
-      };
+      const specs = Array.isArray(clones) && clones.length ? clones : nodeId ? [{ nodeId, x, y }] : [];
+      if (!specs.length) {
+        return { content: [{ type: "text", text: "Error cloning node: provide `nodeId` (single) or a non-empty `clones` array (batch)" }] };
+      }
+      const result = await sendCommandToFigma("clone_node", { clones: specs });
+      const renumber = (id) => renumberIds({ id }).id;
+      const lines = (result?.results || []).map(
+        (r) => r.ok ? `\u2713 ${renumber(r.id)} "${r.name}"` : `\u2717 ${r.nodeId ? renumber(r.nodeId) + ": " : ""}${r.error}`
+      );
+      const text = `cloned ${result?.cloned ?? 0}/${result?.total ?? specs.length}` + (lines.length ? "\n" + lines.join("\n") : "");
+      return { content: [{ type: "text", text }] };
     } catch (error) {
       return {
         content: [
