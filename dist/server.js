@@ -4,11 +4,11 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z as z4 } from "zod";
-import WebSocket from "ws";
+import WebSocket2 from "ws";
 import { v4 as uuidv4 } from "uuid";
 import { writeFile, readFile, mkdir } from "fs/promises";
-import { tmpdir as tmpdir2, homedir } from "os";
-import { dirname, join as join2 } from "path";
+import { tmpdir as tmpdir3, homedir } from "os";
+import { dirname, join as join3 } from "path";
 
 // src/talk_to_figma_mcp/shape.ts
 var VECTOR_LEAF = /* @__PURE__ */ new Set([
@@ -1362,6 +1362,235 @@ function validateEditValue(path, value) {
   return r.error.issues[0]?.message ?? "invalid value";
 }
 
+// src/socket.ts
+import { tmpdir as tmpdir2 } from "os";
+import { join as join2 } from "path";
+var channels = /* @__PURE__ */ new Map();
+var pluginChannels = /* @__PURE__ */ new Map();
+var ACTIVE_CHANNELS_FILE = join2(tmpdir2(), "figma-active-channels.json");
+function writeActiveChannels() {
+  const byChannel = /* @__PURE__ */ new Map();
+  for (const { channel, meta } of pluginChannels.values()) {
+    const entry = byChannel.get(channel) ?? { channel, clients: channels.get(channel)?.size ?? 0 };
+    if (meta) entry.meta = meta;
+    byChannel.set(channel, entry);
+  }
+  const payload = {
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    channels: [...byChannel.values()]
+  };
+  Bun.write(ACTIVE_CHANNELS_FILE, JSON.stringify(payload, null, 2)).catch(
+    (err) => console.error("Failed to write active channels file:", err)
+  );
+}
+function handleConnection(ws2) {
+  console.log("New client connected");
+  ws2.send(JSON.stringify({
+    type: "system",
+    message: "Please join a channel to start chatting"
+  }));
+  ws2.close = () => {
+    console.log("Client disconnected");
+    channels.forEach((clients, channelName) => {
+      if (clients.has(ws2)) {
+        clients.delete(ws2);
+        clients.forEach((client) => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({
+              type: "system",
+              message: "A user has left the channel",
+              channel: channelName
+            }));
+          }
+        });
+      }
+    });
+  };
+}
+function startRelay(port = 3055) {
+  let server2;
+  try {
+    server2 = Bun.serve({
+      port,
+      // uncomment this to allow connections in windows wsl
+      // hostname: "0.0.0.0",
+      fetch(req, server3) {
+        if (req.method === "OPTIONS") {
+          return new Response(null, {
+            headers: {
+              "Access-Control-Allow-Origin": "*",
+              "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+              "Access-Control-Allow-Headers": "Content-Type, Authorization"
+            }
+          });
+        }
+        const success = server3.upgrade(req, {
+          headers: {
+            "Access-Control-Allow-Origin": "*"
+          }
+        });
+        if (success) {
+          return;
+        }
+        return new Response("WebSocket server running", {
+          headers: {
+            "Access-Control-Allow-Origin": "*"
+          }
+        });
+      },
+      websocket: {
+        open: handleConnection,
+        message(ws2, message) {
+          try {
+            const data = JSON.parse(message);
+            console.log(`
+=== Received message from client ===`);
+            console.log(`Type: ${data.type}, Channel: ${data.channel || "N/A"}`);
+            if (data.message?.command) {
+              console.log(`Command: ${data.message.command}, ID: ${data.id}`);
+            } else if (data.message?.result) {
+              console.log(`Response: ID: ${data.id}, Has Result: ${!!data.message.result}`);
+            }
+            console.log(`Full message:`, JSON.stringify(data, null, 2));
+            if (data.type === "ping") {
+              ws2.send(JSON.stringify({ type: "pong" }));
+              return;
+            }
+            if (data.type === "meta") {
+              const entry = pluginChannels.get(ws2);
+              if (entry) {
+                entry.meta = data.meta;
+                writeActiveChannels();
+              }
+              return;
+            }
+            if (data.type === "join") {
+              const channelName = data.channel;
+              if (!channelName || typeof channelName !== "string") {
+                ws2.send(JSON.stringify({
+                  type: "error",
+                  message: "Channel name is required"
+                }));
+                return;
+              }
+              if (!channels.has(channelName)) {
+                channels.set(channelName, /* @__PURE__ */ new Set());
+              }
+              const channelClients = channels.get(channelName);
+              channelClients.add(ws2);
+              console.log(`
+\u2713 Client joined channel "${channelName}" (${channelClients.size} total clients)`);
+              if (data.role === "plugin") {
+                pluginChannels.set(ws2, { channel: channelName, meta: data.meta });
+                writeActiveChannels();
+              }
+              ws2.send(JSON.stringify({
+                type: "system",
+                message: `Joined channel: ${channelName}`,
+                channel: channelName
+              }));
+              ws2.send(JSON.stringify({
+                type: "system",
+                message: {
+                  id: data.id,
+                  result: "Connected to channel: " + channelName
+                },
+                channel: channelName
+              }));
+              channelClients.forEach((client) => {
+                if (client !== ws2 && client.readyState === WebSocket.OPEN) {
+                  client.send(JSON.stringify({
+                    type: "system",
+                    message: "A new user has joined the channel",
+                    channel: channelName
+                  }));
+                }
+              });
+              return;
+            }
+            if (data.type === "message") {
+              const channelName = data.channel;
+              if (!channelName || typeof channelName !== "string") {
+                ws2.send(JSON.stringify({
+                  type: "error",
+                  message: "Channel name is required"
+                }));
+                return;
+              }
+              const channelClients = channels.get(channelName);
+              if (!channelClients || !channelClients.has(ws2)) {
+                ws2.send(JSON.stringify({
+                  type: "error",
+                  message: "You must join the channel first"
+                }));
+                return;
+              }
+              let broadcastCount = 0;
+              channelClients.forEach((client) => {
+                if (client !== ws2 && client.readyState === WebSocket.OPEN) {
+                  broadcastCount++;
+                  const broadcastMessage = {
+                    type: "broadcast",
+                    message: data.message,
+                    sender: "peer",
+                    channel: channelName
+                  };
+                  console.log(`
+=== Broadcasting to peer #${broadcastCount} ===`);
+                  console.log(JSON.stringify(broadcastMessage, null, 2));
+                  client.send(JSON.stringify(broadcastMessage));
+                }
+              });
+              if (broadcastCount === 0) {
+                console.log(`\u26A0\uFE0F  No other clients in channel "${channelName}" to receive message!`);
+                ws2.send(JSON.stringify({
+                  type: "error",
+                  id: data.message?.id,
+                  message: {
+                    id: data.message?.id,
+                    error: `No client is connected to channel "${channelName}" to handle the command. Is the Figma plugin still connected?`
+                  },
+                  channel: channelName
+                }));
+              } else {
+                console.log(`\u2713 Broadcast to ${broadcastCount} peer(s) in channel "${channelName}"`);
+              }
+            }
+            if (data.type === "progress_update") {
+              const channelName = data.channel;
+              if (!channelName) return;
+              const channelClients = channels.get(channelName);
+              if (!channelClients || !channelClients.has(ws2)) return;
+              channelClients.forEach((client) => {
+                if (client !== ws2 && client.readyState === WebSocket.OPEN) {
+                  client.send(JSON.stringify(data));
+                }
+              });
+            }
+          } catch (err) {
+            console.error("Error handling message:", err);
+          }
+        },
+        close(ws2) {
+          channels.forEach((clients) => {
+            clients.delete(ws2);
+          });
+          if (pluginChannels.delete(ws2)) {
+            writeActiveChannels();
+          }
+        }
+      }
+    });
+  } catch (err) {
+    if (err?.code === "EADDRINUSE" || /in use|EADDRINUSE/i.test(String(err?.message))) {
+      return null;
+    }
+    throw err;
+  }
+  console.log(`WebSocket server running on port ${server2.port}`);
+  return server2;
+}
+
 // src/talk_to_figma_mcp/server.ts
 var logger = {
   info: (message) => process.stderr.write(`[INFO] ${message}
@@ -1429,7 +1658,7 @@ async function fetchAssetBytes(url) {
   let localPath;
   if (url.startsWith("file://")) localPath = decodeURIComponent(new URL(url).pathname);
   else if (url.startsWith("/")) localPath = url;
-  else if (url.startsWith("~/")) localPath = join2(homedir(), url.slice(2));
+  else if (url.startsWith("~/")) localPath = join3(homedir(), url.slice(2));
   let buf;
   if (localPath !== void 0) {
     buf = await readFile(localPath);
@@ -1451,7 +1680,7 @@ async function fetchAssetText(url) {
 }
 async function writeOutputFile(baseName, ext, data, outputPath) {
   const safeBase = baseName.replace(/[^a-zA-Z0-9_-]/g, "-");
-  const target = outputPath ? outputPath : join2(tmpdir2(), "talk-to-figma", `${safeBase}-${Date.now()}-${outputFileSeq++}.${ext}`);
+  const target = outputPath ? outputPath : join3(tmpdir3(), "talk-to-figma", `${safeBase}-${Date.now()}-${outputFileSeq++}.${ext}`);
   await mkdir(dirname(target), { recursive: true });
   await writeFile(target, data);
   const bytes = typeof data === "string" ? Buffer.byteLength(data) : data.length;
@@ -2008,7 +2237,7 @@ server.tool(
           }
           const safeId = nodeId.replace(/[^a-zA-Z0-9_-]/g, "-");
           const baseName = `export-${safeId}@${img.scale}x`;
-          const target = outputDir ? join2(outputDir, `${baseName}.${ext}`) : void 0;
+          const target = outputDir ? join3(outputDir, `${baseName}.${ext}`) : void 0;
           const { path, bytes } = await writeOutputFile(baseName, ext, buffer, target);
           const note = inline && !inlineable ? " (file: inline unsupported for this format)" : inline ? " (file: too large to inline)" : "";
           written.push(`${nodeId} @${img.scale}x \u2192 ${path} (${bytes} bytes)${note}`);
@@ -3399,14 +3628,29 @@ This detailed process ensures you correctly interpret the reaction data, prepare
     };
   }
 );
+var embeddedRelay = null;
+function ensureRelay(port) {
+  if (serverUrl !== "localhost") return;
+  if (embeddedRelay) return;
+  if (typeof Bun === "undefined") return;
+  try {
+    embeddedRelay = startRelay(port);
+    if (embeddedRelay) {
+      logger.info(`Embedded WebSocket relay listening on port ${port}`);
+    }
+  } catch (error) {
+    logger.warn(`Could not start embedded relay: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
 function connectToFigma(port = 3055) {
-  if (ws && ws.readyState === WebSocket.OPEN) {
+  ensureRelay(port);
+  if (ws && ws.readyState === WebSocket2.OPEN) {
     logger.info("Already connected to Figma");
     return;
   }
   const wsUrl = serverUrl === "localhost" ? `${WS_URL}:${port}` : WS_URL;
   logger.info(`Connecting to Figma socket server at ${wsUrl}...`);
-  ws = new WebSocket(wsUrl);
+  ws = new WebSocket2(wsUrl);
   ws.on("open", () => {
     logger.info("Connected to Figma socket server");
     if (currentChannel) {
@@ -3491,7 +3735,7 @@ function connectToFigma(port = 3055) {
   });
 }
 async function joinChannel(channelName) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
+  if (!ws || ws.readyState !== WebSocket2.OPEN) {
     throw new Error("Not connected to Figma");
   }
   try {
@@ -3506,14 +3750,14 @@ async function joinChannel(channelName) {
 }
 function waitForConnection(timeoutMs = 1e4) {
   return new Promise((resolve, reject) => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    if (ws && ws.readyState === WebSocket2.OPEN) {
       resolve();
       return;
     }
     connectToFigma();
     const start = Date.now();
     const interval = setInterval(() => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
+      if (ws && ws.readyState === WebSocket2.OPEN) {
         clearInterval(interval);
         resolve();
       } else if (Date.now() - start > timeoutMs) {
@@ -3539,7 +3783,7 @@ async function recoverPluginChannel() {
 }
 function sendCommandToFigma(command, params = {}, timeoutMs = 3e4, isRetry = false) {
   return new Promise((resolve, reject) => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
+    if (!ws || ws.readyState !== WebSocket2.OPEN) {
       if (command === "join") {
         reject(new Error("Not connected to Figma"));
         return;
@@ -3615,10 +3859,10 @@ function sendCommandToFigma(command, params = {}, timeoutMs = 3e4, isRetry = fal
     ws.send(JSON.stringify(request));
   });
 }
-var ACTIVE_CHANNELS_FILE = join2(tmpdir2(), "figma-active-channels.json");
+var ACTIVE_CHANNELS_FILE2 = join3(tmpdir3(), "figma-active-channels.json");
 async function readActiveChannels() {
   try {
-    const raw = await readFile(ACTIVE_CHANNELS_FILE, "utf8");
+    const raw = await readFile(ACTIVE_CHANNELS_FILE2, "utf8");
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed?.channels) ? parsed.channels : [];
   } catch {
@@ -3636,7 +3880,7 @@ server.tool(
         content: [
           {
             type: "text",
-            text: "No active plugin channel found. Make sure the WebSocket relay (bun socket) is running and the Figma plugin is connected."
+            text: "No active plugin channel found. Open the TalkToFigma plugin in Figma and press Connect (the relay is hosted by this MCP server automatically)."
           }
         ]
       };

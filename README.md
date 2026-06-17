@@ -43,15 +43,11 @@ curl -fsSL https://bun.sh/install | bash
 bun setup
 ```
 
-3. Start the WebSocket relay:
+3. Install the Figma plugin — see [Figma Plugin](#figma-plugin) below. (Install locally: this fork ships a modified plugin, so the upstream community listing won't include the changes above.)
 
-```bash
-bun socket
-```
+4. Run the plugin in Figma and press **Connect** — that's it. The WebSocket relay is hosted by the MCP server automatically when your agent starts it, so there's no terminal command to run.
 
-4. Install the Figma plugin — see [Figma Plugin](#figma-plugin) below. (Install locally: this fork ships a modified plugin, so the upstream community listing won't include the changes above.)
-
-5. Run the plugin in Figma, join a channel, then drive it from your agent.
+> Running the relay manually with `bun socket` is still supported (e.g. to share one relay across machines), but it's optional — the embedded relay binds port 3055 on first use and any extra agent or `bun socket` instance just connects to it.
 
 ## Manual Setup and Installation
 
@@ -76,7 +72,9 @@ Or via the Claude Code CLI:
 claude mcp add TalkToFigma -- bunx @dankinsoid/claude-talk-to-figma-mcp@latest
 ```
 
-### WebSocket Server
+### WebSocket Server (optional)
+
+The MCP server hosts the relay in-process, so you normally don't need this. Run it standalone only if you want a relay that outlives any single agent (e.g. shared across machines):
 
 ```bash
 bun socket

@@ -17,7 +17,7 @@
   "type": "module",
   "scripts": {
     "start": "bun run dist/server.js",
-    "socket": "bun run src/socket.ts",
+    "socket": "bun run src/socket-cli.ts",
     "setup": "./scripts/setup.sh",
     "build": "tsup",
     "gen:schema": "bun run scripts/gen-write-schema.ts",

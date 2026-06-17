@@ -11,6 +11,7 @@ import { dirname, join } from "path";
 import { shapeNode } from "./shape.js";
 import { renumberIds, resolveShortIdsInParams, setIdMapNamespace } from "./idmap.js";
 import { writeNodeUnion, describeNodeSchema, listNodeTypes, validateEditValue, NODE_TYPES, type NodeType } from "./write_schema.js";
+import { startRelay } from "../socket";
 
 // Define TypeScript interfaces for Figma responses
 interface FigmaResponse {
@@ -2852,8 +2853,35 @@ type CommandParams = {
 };
 
 
+// The relay process (socket.ts) we host in-process, if we won the port race.
+let embeddedRelay: ReturnType<typeof startRelay> | null = null;
+
+// Embed the WebSocket relay so the user never has to run `bun socket` in a
+// terminal. The MCP server is launched automatically by the agent, so hosting
+// the relay here means a single click ("Connect" in the plugin) is enough.
+//
+// Port-bind is the lock: whoever binds 3055 first hosts it; everyone else
+// (a second agent, or a manually-started `bun socket`) just connects as a
+// client. Called on every connect attempt so that if the hosting process dies,
+// the next agent to reconnect re-hosts it (failover). Only for local relays —
+// when pointed at a remote --server we connect out, never host.
+function ensureRelay(port: number) {
+  if (serverUrl !== 'localhost') return;
+  if (embeddedRelay) return; // already hosting
+  if (typeof Bun === 'undefined') return; // not on the Bun runtime → can't host
+  try {
+    embeddedRelay = startRelay(port);
+    if (embeddedRelay) {
+      logger.info(`Embedded WebSocket relay listening on port ${port}`);
+    }
+  } catch (error) {
+    logger.warn(`Could not start embedded relay: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 // Update the connectToFigma function
 function connectToFigma(port: number = 3055) {
+  ensureRelay(port);
   // If already connected, do nothing
   if (ws && ws.readyState === WebSocket.OPEN) {
     logger.info('Already connected to Figma');
@@ -3207,7 +3235,7 @@ server.tool(
         content: [
           {
             type: "text",
-            text: "No active plugin channel found. Make sure the WebSocket relay (bun socket) is running and the Figma plugin is connected.",
+            text: "No active plugin channel found. Open the TalkToFigma plugin in Figma and press Connect (the relay is hosted by this MCP server automatically).",
           },
         ],
       };

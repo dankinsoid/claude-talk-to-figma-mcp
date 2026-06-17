@@ -481,8 +481,12 @@
 
           <h2>How to Use</h2>
           <ol>
-            <li>Make sure the MCP server is running in your agent</li>
-            <li>Connect to the server using the port number (default: 3055)</li>
+            <li>
+              Add the <strong>TalkToFigma</strong> MCP server to your AI agent
+              (Claude Code / Cursor) and start the agent — it hosts the
+              connection automatically, no terminal command needed
+            </li>
+            <li>Press Connect (default port: 3055)</li>
             <li>Once connected, you can interact with Figma through your agent</li>
           </ol>
         </div>
@@ -562,9 +566,11 @@
             ? "Connected to MCP server"
             : "Not connected to MCP server");
 
-        // Add instructions for localhost when disconnected
+        // Add instructions for localhost when disconnected. The relay is hosted
+        // by the agent's MCP server now, so there's no terminal command to run —
+        // the user just needs their AI agent running with TalkToFigma configured.
         if (!isConnected) {
-          statusMessage += `<br><br>Run this in your terminal, then connect<br><code>bunx claude-talk-to-figma-socket</code>`;
+          statusMessage += `<br><br>Make sure your AI agent (Claude Code / Cursor) is running with the <strong>TalkToFigma</strong> MCP server configured, then press Connect.`;
         }
 
         connectionStatus.innerHTML = statusMessage;

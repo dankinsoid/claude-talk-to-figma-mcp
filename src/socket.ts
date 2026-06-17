@@ -73,8 +73,14 @@ function handleConnection(ws: ServerWebSocket<any>) {
   };
 }
 
-const server = Bun.serve({
-  port: 3055,
+// Start the relay on `port`. Returns the running server, or null if the port is
+// already taken — that means another process (e.g. a second AI agent's embedded
+// relay) is already hosting it, so the caller should just connect as a client.
+export function startRelay(port: number = 3055): Server | null {
+  let server: Server;
+  try {
+    server = Bun.serve({
+  port,
   // uncomment this to allow connections in windows wsl
   // hostname: "0.0.0.0",
   fetch(req: Request, server: Server) {
@@ -283,5 +289,15 @@ const server = Bun.serve({
     }
   }
 });
+  } catch (err: any) {
+    // EADDRINUSE → someone else already hosts the relay on this port. Not an
+    // error for the embedded case; the caller falls back to client-only.
+    if (err?.code === "EADDRINUSE" || /in use|EADDRINUSE/i.test(String(err?.message))) {
+      return null;
+    }
+    throw err;
+  }
 
-console.log(`WebSocket server running on port ${server.port}`);
+  console.log(`WebSocket server running on port ${server.port}`);
+  return server;
+}
