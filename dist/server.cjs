@@ -2308,6 +2308,12 @@ server.tool(
       })
     ).nonempty().describe("Nodes to export. Each entry exports its node at its own scale(s)."),
     format: import_zod4.z.enum(["PNG", "JPG", "SVG", "PDF"]).optional().describe("Export format shared by all nodes (default PNG)."),
+    contentsOnly: import_zod4.z.boolean().optional().describe(
+      "Whether to export only the node's own contents (default true). Set false to include overlapping/underlying layers \u2014 e.g. capture a background sitting behind the node. Figma calls this 'Ignore overlapping layers'."
+    ),
+    useAbsoluteBounds: import_zod4.z.boolean().optional().describe(
+      "Export using the node's full absolute bounding box instead of clipping to its geometry (default false). Set true to keep effects that overflow the node, e.g. drop shadows or blur. Figma calls this 'Include bounding box'."
+    ),
     inline: import_zod4.z.boolean().optional().describe(
       `Return the image(s) directly in the response instead of writing files, so you can see them. Set this whenever you want to look at how something renders \u2014 and pair it with a small scale (e.g. 0.5) to keep it cheap. Honored only for raster formats (PNG/JPG) whose encoded size is under ${INLINE_MAX_BYTES / 1024}KB \u2014 anything larger (or SVG/PDF) falls back to a file to avoid blowing up the context.`
     ),
@@ -2315,7 +2321,7 @@ server.tool(
       "Directory to write the images into (created if missing). Defaults to the OS temp dir. Files are auto-named export-<nodeId>@<scale>x.<ext>. Ignored for images returned inline."
     )
   },
-  async ({ nodes, format, inline, outputDir }) => {
+  async ({ nodes, format, inline, outputDir, contentsOnly, useAbsoluteBounds }) => {
     const fmt = format || "PNG";
     const ext = fmt.toLowerCase() === "jpg" ? "jpg" : fmt.toLowerCase();
     const inlineable = inline && (fmt === "PNG" || fmt === "JPG");
@@ -2327,7 +2333,9 @@ server.tool(
         const result = await sendCommandToFigma("export_node_as_image", {
           nodeId,
           format: fmt,
-          scale: scale ?? 1
+          scale: scale ?? 1,
+          contentsOnly,
+          useAbsoluteBounds
         });
         const typedResult = result;
         for (const img of typedResult.images) {

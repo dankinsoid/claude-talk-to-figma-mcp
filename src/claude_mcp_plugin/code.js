@@ -1500,7 +1500,7 @@ const EXPORT_MIME_TYPES = {
 };
 
 async function exportNodeAsImage(params) {
-  const { nodeId, format = "PNG", scale = 1 } = params || {};
+  const { nodeId, format = "PNG", scale = 1, contentsOnly, useAbsoluteBounds } = params || {};
 
   if (!nodeId) {
     throw new Error("Missing nodeId parameter");
@@ -1539,6 +1539,10 @@ async function exportNodeAsImage(params) {
       const settings = usesScale
         ? { format, constraint: { type: "SCALE", value: s } }
         : { format };
+      // contentsOnly/useAbsoluteBounds apply to every format; only forward when
+      // set so we keep exportAsync's own defaults (true/false respectively).
+      if (typeof contentsOnly === "boolean") settings.contentsOnly = contentsOnly;
+      if (typeof useAbsoluteBounds === "boolean") settings.useAbsoluteBounds = useAbsoluteBounds;
       const bytes = await node.exportAsync(settings);
       images.push({ scale: s, imageData: customBase64Encode(bytes) });
     }

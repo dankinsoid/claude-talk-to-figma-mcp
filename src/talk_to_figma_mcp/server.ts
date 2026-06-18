@@ -1021,6 +1021,18 @@ server.tool(
       .enum(["PNG", "JPG", "SVG", "PDF"])
       .optional()
       .describe("Export format shared by all nodes (default PNG)."),
+    contentsOnly: z
+      .boolean()
+      .optional()
+      .describe(
+        "Whether to export only the node's own contents (default true). Set false to include overlapping/underlying layers — e.g. capture a background sitting behind the node. Figma calls this 'Ignore overlapping layers'."
+      ),
+    useAbsoluteBounds: z
+      .boolean()
+      .optional()
+      .describe(
+        "Export using the node's full absolute bounding box instead of clipping to its geometry (default false). Set true to keep effects that overflow the node, e.g. drop shadows or blur. Figma calls this 'Include bounding box'."
+      ),
     inline: z
       .boolean()
       .optional()
@@ -1034,7 +1046,7 @@ server.tool(
         "Directory to write the images into (created if missing). Defaults to the OS temp dir. Files are auto-named export-<nodeId>@<scale>x.<ext>. Ignored for images returned inline."
       ),
   },
-  async ({ nodes, format, inline, outputDir }: any) => {
+  async ({ nodes, format, inline, outputDir, contentsOnly, useAbsoluteBounds }: any) => {
     const fmt = format || "PNG";
     const ext = fmt.toLowerCase() === "jpg" ? "jpg" : fmt.toLowerCase();
     const inlineable = inline && (fmt === "PNG" || fmt === "JPG");
@@ -1051,6 +1063,8 @@ server.tool(
           nodeId,
           format: fmt,
           scale: scale ?? 1,
+          contentsOnly,
+          useAbsoluteBounds,
         });
         const typedResult = result as {
           mimeType: string;
