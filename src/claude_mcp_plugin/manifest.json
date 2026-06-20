@@ -9,6 +9,9 @@
     "figjam",
     "dev"
   ],
+  "capabilities": [
+    "inspect"
+  ],
   "permissions": [],
   "networkAccess": {
     "allowedDomains": [
