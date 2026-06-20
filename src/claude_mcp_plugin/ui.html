@@ -1037,6 +1037,10 @@
           case "file-info":
             state.fileInfo = message.info;
             if (message.channel) state.stableChannel = message.channel;
+            // Hide the compact toggle in Dev Mode — see isDevMode().
+            document.getElementById("btn-compact").style.display = isDevMode()
+              ? "none"
+              : "";
             fileInfoArrived();
             // If a page switch/rename happened while connected, push the fresh
             // context to the relay so the channel listing stays accurate.
@@ -1185,7 +1189,15 @@
         }, 15);
       }
 
+      // In Dev/Code mode the plugin UI is docked into the Inspect panel (a fixed
+      // full-height region), so a floating compact badge can't shrink the window
+      // and just looks broken — keep the full UI there.
+      function isDevMode() {
+        return !!(state.fileInfo && state.fileInfo.editorType === "dev");
+      }
+
       function setCompact(compact, pin) {
+        if (compact && isDevMode()) return;
         if (state.compact === compact) return;
         state.compact = compact;
         if (pin) state.pinned = true;
