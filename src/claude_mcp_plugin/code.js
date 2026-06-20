@@ -237,7 +237,28 @@ function updateSettings(settings) {
 }
 
 // Handle commands from UI
+// Commands that mutate the document. In Dev/Code mode (and view-only files,
+// which only run plugins in Dev Mode) the document is read-only, so these would
+// throw a cryptic Figma error — fail early with a clear, actionable message.
+const WRITE_COMMANDS = new Set([
+  "write_nodes", "edit_nodes", "reparent_nodes", "delete_nodes",
+  "write_styles", "edit_styles", "clone_node", "set_annotations",
+  "set_instance_overrides", "set_reactions", "set_default_connector",
+  "create_connections", "set_focus", "set_selections", "combine_as_variants",
+  "boolean_operation", "edit_groups", "write_table", "edit_table",
+  "set_variables", "bind_variables", "convert_nodes", "transform_nodes",
+  "style_text_range",
+]);
+
 async function handleCommand(command, params) {
+  if (figma.editorType === "dev" && WRITE_COMMANDS.has(command)) {
+    throw new Error(
+      `Cannot run "${command}": the document is read-only in Dev/Code mode. ` +
+      `Only read tools (get_selection, read_node, query/glob/grep_nodes, ` +
+      `export_node_as_image, get_styles, get_variables, …) work here. ` +
+      `Switch Figma to design mode to edit.`
+    );
+  }
   switch (command) {
     case "get_selection":
       return await getSelection();
