@@ -4,6 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import WebSocket from "ws";
+import { spawn } from "child_process";
 import { v4 as uuidv4 } from "uuid";
 import { writeFile, readFile, mkdir } from "fs/promises";
 import { tmpdir, homedir } from "os";
@@ -2918,29 +2919,41 @@ type CommandParams = {
 };
 
 
-// The relay process (socket.ts) we host in-process, if we won the port race.
-let embeddedRelay: ReturnType<typeof startRelay> | null = null;
+// Throttle relay spawns: at most one attempt per window. The spawned process
+// arbitrates ownership itself via the port bind (exits on EADDRINUSE), so a
+// redundant spawn during a reconnect storm is harmless, just wasteful.
+let lastRelaySpawnAt = 0;
 
-// Embed the WebSocket relay so the user never has to run `bun socket` in a
-// terminal. The MCP server is launched automatically by the agent, so hosting
-// the relay here means a single click ("Connect" in the plugin) is enough.
+// Make sure a WebSocket relay is running so the user never has to start one in a
+// terminal. Unlike the old in-process host, we spawn the relay as a DETACHED
+// child that outlives this MCP server — so closing the agent session that
+// started it doesn't kill the relay and drop the Figma plugin's connection.
 //
-// Port-bind is the lock: whoever binds 3055 first hosts it; everyone else
-// (a second agent, or a manually-started `bun socket`) just connects as a
-// client. Called on every connect attempt so that if the hosting process dies,
-// the next agent to reconnect re-hosts it (failover). Only for local relays —
-// when pointed at a remote --server we connect out, never host.
+// Port-bind is the lock: whoever binds 3055 first hosts it. We re-run this very
+// bundle with `--relay-only`; if the port is already taken (another agent, or a
+// manually-started `bun socket`), the child exits immediately and we just
+// connect as a client. Only for local relays — with a remote --server we
+// connect out, never host.
 function ensureRelay(port: number) {
   if (serverUrl !== 'localhost') return;
-  if (embeddedRelay) return; // already hosting
-  if (typeof Bun === 'undefined') return; // not on the Bun runtime → can't host
+  if (typeof Bun === 'undefined') return; // relay needs Bun.serve to host
+  const now = Date.now();
+  if (now - lastRelaySpawnAt < 3000) return;
+  lastRelaySpawnAt = now;
+  const entry = (typeof Bun !== 'undefined' && Bun.main) || process.argv[1];
+  if (!entry) return;
   try {
-    embeddedRelay = startRelay(port);
-    if (embeddedRelay) {
-      logger.info(`Embedded WebSocket relay listening on port ${port}`);
-    }
+    const child = spawn(process.execPath, [entry, '--relay-only'], {
+      detached: true,        // own process group → survives our exit
+      stdio: 'ignore',
+      env: { ...process.env, PORT: String(port) },
+    });
+    child.on('error', (err) =>
+      logger.warn(`Could not spawn relay: ${err instanceof Error ? err.message : String(err)}`)
+    );
+    child.unref();           // don't keep our event loop alive for it
   } catch (error) {
-    logger.warn(`Could not start embedded relay: ${error instanceof Error ? error.message : String(error)}`);
+    logger.warn(`Could not spawn relay: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -3389,6 +3402,20 @@ server.tool(
 
 // Start the server
 async function main() {
+  // Relay-only mode: spawned (detached) by ensureRelay to host the WebSocket
+  // relay as a standalone process. Bind the port and stay alive serving; never
+  // start the MCP stdio transport. If the port is taken, another relay already
+  // won — exit quietly.
+  if (args.includes('--relay-only')) {
+    const port = Number(process.env.PORT) || 3055;
+    const relay = startRelay(port);
+    if (!relay) {
+      process.exit(0); // already hosted elsewhere
+    }
+    logger.info(`Standalone WebSocket relay listening on port ${port}`);
+    return; // Bun.serve keeps the process alive
+  }
+
   try {
     // Try to connect to Figma socket server
     connectToFigma();

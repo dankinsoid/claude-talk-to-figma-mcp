@@ -5,6 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z as z4 } from "zod";
 import WebSocket2 from "ws";
+import { spawn } from "child_process";
 import { v4 as uuidv4 } from "uuid";
 import { writeFile, readFile, mkdir } from "fs/promises";
 import { tmpdir as tmpdir3, homedir } from "os";
@@ -3724,18 +3725,29 @@ This detailed process ensures you correctly interpret the reaction data, prepare
     };
   }
 );
-var embeddedRelay = null;
+var lastRelaySpawnAt = 0;
 function ensureRelay(port) {
   if (serverUrl !== "localhost") return;
-  if (embeddedRelay) return;
   if (typeof Bun === "undefined") return;
+  const now = Date.now();
+  if (now - lastRelaySpawnAt < 3e3) return;
+  lastRelaySpawnAt = now;
+  const entry = typeof Bun !== "undefined" && Bun.main || process.argv[1];
+  if (!entry) return;
   try {
-    embeddedRelay = startRelay(port);
-    if (embeddedRelay) {
-      logger.info(`Embedded WebSocket relay listening on port ${port}`);
-    }
+    const child = spawn(process.execPath, [entry, "--relay-only"], {
+      detached: true,
+      // own process group → survives our exit
+      stdio: "ignore",
+      env: { ...process.env, PORT: String(port) }
+    });
+    child.on(
+      "error",
+      (err) => logger.warn(`Could not spawn relay: ${err instanceof Error ? err.message : String(err)}`)
+    );
+    child.unref();
   } catch (error) {
-    logger.warn(`Could not start embedded relay: ${error instanceof Error ? error.message : String(error)}`);
+    logger.warn(`Could not spawn relay: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 function connectToFigma(port = 3055) {
@@ -4051,6 +4063,15 @@ server.tool(
   }
 );
 async function main() {
+  if (args.includes("--relay-only")) {
+    const port = Number(process.env.PORT) || 3055;
+    const relay = startRelay(port);
+    if (!relay) {
+      process.exit(0);
+    }
+    logger.info(`Standalone WebSocket relay listening on port ${port}`);
+    return;
+  }
   try {
     connectToFigma();
   } catch (error) {
