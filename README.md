@@ -23,6 +23,57 @@ This fork reworks the agent's interface around how an AI agent already works wit
 - **Bug fixes.** Notably, the original could corrupt text colors: the reaction-highlight animation didn't always restore the original fill. Fixed.
 - **Small UX touches.** The plugin's channel window collapses to a compact widget so it stays out of the way, and the agent can discover the active channel automatically (`get_active_channel`) instead of you pasting it.
 
+### Measured against upstream
+
+All three benchmarks replay a captured fixture — a raw `JSON_REST_V1` export of
+a real screen — through both this fork's compaction and upstream's
+`filterFigmaNode`, vendored verbatim. Both sides are pure functions of that same
+export, so once a fixture exists a run needs no Figma connection and no API key.
+Capture your own (see [`bench/README.md`](bench/README.md)), then:
+
+```bash
+bun run scripts/bench-compaction.ts bench/fixtures   # one read of a known node
+bun run scripts/bench-navigation.ts                  # locating a node
+bun run scripts/bench-flow.ts                        # find, then inspect
+```
+
+**Reading one node** (3 screens, 1,188 nodes) — same node set, so this is
+representation alone: **−33%**. With icon/repeat collapsing and culling of
+non-rendering nodes at default settings, a screen goes from 96k to 15k tokens
+(**6.4×**), though that returns fewer nodes.
+
+**Finding a node** is where the difference stops being incremental. Upstream has
+no name or type search: `get_document_info` returns the page's direct children,
+and `get_node_info` has no depth parameter — it returns the entire subtree below
+a node. Locating a component means opening whole sections one at a time.
+
+**A realistic task** — find the `Music / Player` component, then inspect its
+properties — measured end to end:
+
+| step | this fork | upstream |
+|---|---|---|
+| locate the component | `glob_nodes` — **108** | `get_document_info` — **2,282** |
+| read its structure | `read_node` — **178** | `get_node_info(section)` — **393,463** |
+| inspect properties | `read_node(fields:[…])` — **122** | `get_node_info(component)` — **435** |
+| **total** | **408 tok** | **396,180 tok** |
+
+The headline ratio is large, but the useful observation is narrower: **the gap is
+the search, not the read.** Upstream is fine at step 3 — 435 tokens, because the
+component is small and having no field projection costs little there. Step 2 is
+99% of its total: reaching a 6-node component costs a 4,246-node section read,
+since the only way down returns everything beneath it. That one call exceeds a
+200k context window, so the flow cannot complete upstream at any budget.
+
+Compaction alone is worth ~6× on a read. The indexing tools are what make the
+difference categorical rather than incremental.
+
+Caveats, since the numbers are flattering: token counts use `cl100k_base`
+(js-tiktoken), not Claude's tokenizer — treat the ratios as the signal, not the
+absolute values. The numbers below come from three screens of one mobile-UI file, where
+repeated component instances are exactly what collapsing exploits. And upstream's
+step 2 assumes it guesses the right section first try; a miss costs another
+section-sized read. Details and methodology in [`bench/README.md`](bench/README.md).
+
 ## Project Structure
 
 - `src/talk_to_figma_mcp/` - TypeScript MCP server for Figma integration
