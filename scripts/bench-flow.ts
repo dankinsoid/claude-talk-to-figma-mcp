@@ -74,17 +74,17 @@ const count = (n: any): number =>
 
 const docInfo = JSON.parse(read("bench/fixtures/doc-info.json"));
 // The section that actually contains the target — the branch upstream must open
-// to reach it. (The component lives under "Playlist", not under "Player".)
-const section = JSON.parse(read("bench/fixtures/flow/raw-playlist-section.json"))[0].node;
+// to reach it.
+const section = JSON.parse(read("bench/fixtures/nav-section-iphone.json"))[0].node;
 // The component itself, captured separately: upstream's step 3 reads this node,
 // and get_node_info returns its whole subtree.
 const target = JSON.parse(read("bench/fixtures/flow/raw-component.json"))[0].node;
 
 // ── OURS: verbatim transcript of three live calls.
 const ourSteps = [
-	{ label: `glob_nodes(name:"Music / Player")`, out: read("bench/fixtures/flow/step1-glob.txt") },
-	{ label: `read_node(["n0"])`, out: read("bench/fixtures/flow/step2-read.json") },
-	{ label: `read_node(["n0"], fields:[...])`, out: read("bench/fixtures/flow/step3-fields.json") },
+	{ label: `glob_nodes(name:"Examples/Alert")`, out: read("bench/fixtures/flow/step1-glob.txt") },
+	{ label: `read_node(["n392"])`, out: read("bench/fixtures/flow/step2-read.json") },
+	{ label: `read_node(["n392"], fields:[…])`, out: read("bench/fixtures/flow/step3-fields.json") },
 ];
 const ourTok = ourSteps.map((s) => tokens(s.out));
 const ourTotal = ourTok.reduce((a, b) => a + b, 0);
@@ -102,13 +102,13 @@ const upTargetTok = upTarget ? tokens(ser(upTarget)) : 0;
 
 const upSteps = [
 	{ label: `get_document_info()`, tok: upDoc, note: `${docInfo.children.length} top-level stubs, names only` },
-	{ label: `get_node_info("Playlist" section)`, tok: upSectionTok, note: `${fmt(count(upSection))} nodes — whole section` },
+	{ label: `get_node_info("iPhone" section)`, tok: upSectionTok, note: `${fmt(count(upSection))} nodes — whole section` },
 	{ label: `get_node_info(component)`, tok: upTargetTok, note: `${fmt(count(upTarget))} nodes, all fields — no projection` },
 ];
 const upTotal = upSteps.reduce((a, s) => a + s.tok, 0);
 
 console.log(`\ntokenizer: cl100k_base (js-tiktoken)`);
-console.log(`task: find the "Music / Player" component, then inspect its properties\n`);
+console.log(`task: find the "Alert" component, then inspect its properties\n`);
 
 console.log(`── ours (transcript of three live calls)`);
 ourSteps.forEach((s, i) => {

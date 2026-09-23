@@ -37,40 +37,42 @@ bun run scripts/bench-navigation.ts                  # locating a node
 bun run scripts/bench-flow.ts                        # find, then inspect
 ```
 
-**Reading one node** (3 screens, 1,188 nodes) — same node set, so this is
-representation alone: **−33%**. With icon/repeat collapsing and culling of
-non-rendering nodes at default settings, a screen goes from 96k to 15k tokens
-(**6.4×**), though that returns fewer nodes.
+**Reading one node** (3 iPhone screens, 468 nodes) — same node set, so this is
+representation alone: **−46%**. With icon/repeat collapsing and culling of
+non-rendering nodes at default settings, the three screens go from 38k to 13k
+tokens (**2.8×**), though that returns fewer nodes.
 
 **Finding a node** is where the difference stops being incremental. Upstream has
 no name or type search: `get_document_info` returns the page's direct children,
 and `get_node_info` has no depth parameter — it returns the entire subtree below
 a node. Locating a component means opening whole sections one at a time.
 
-**A realistic task** — find the `Music / Player` component, then inspect its
-properties — measured end to end:
+**A realistic task** — find the `Alert` component, then inspect its properties —
+measured end to end:
 
 | step | this fork | upstream |
 |---|---|---|
-| locate the component | `glob_nodes` — **108** | `get_document_info` — **2,282** |
-| read its structure | `read_node` — **178** | `get_node_info(section)` — **393,463** |
-| inspect properties | `read_node(fields:[…])` — **122** | `get_node_info(component)` — **435** |
-| **total** | **408 tok** | **396,180 tok** |
+| locate the component | `glob_nodes` — **28** | `get_document_info` — **117** |
+| read its structure | `read_node` — **894** | `get_node_info(section)` — **417,593** |
+| inspect properties | `read_node(fields:[…])` — **190** | `get_node_info(component)` — **1,984** |
+| **total** | **1,112 tok** | **419,694 tok** |
 
 The headline ratio is large, but the useful observation is narrower: **the gap is
-the search, not the read.** Upstream is fine at step 3 — 435 tokens, because the
+the search, not the read.** Upstream is fine at step 3 — 1,984 tokens, because the
 component is small and having no field projection costs little there. Step 2 is
-99% of its total: reaching a 6-node component costs a 4,246-node section read,
+99% of its total: reaching a 25-node component costs a 5,059-node section read,
 since the only way down returns everything beneath it. That one call exceeds a
 200k context window, so the flow cannot complete upstream at any budget.
 
-Compaction alone is worth ~6× on a read. The indexing tools are what make the
+Compaction alone is worth ~2.8× on a read. The indexing tools are what make the
 difference categorical rather than incremental.
 
 Caveats, since the numbers are flattering: token counts use `cl100k_base`
 (js-tiktoken), not Claude's tokenizer — treat the ratios as the signal, not the
-absolute values. The numbers below come from three screens of one mobile-UI file, where
-repeated component instances are exactly what collapsing exploits. And upstream's
+absolute values. The numbers come from Apple's public
+[iOS and iPadOS](https://www.figma.com/community/file/1651309003795292092/ios-and-ipados-27)
+community kit, so they are reproducible — but they are one file, and compaction's
+win scales with how much a design repeats component instances. And upstream's
 step 2 assumes it guesses the right section first try; a miss costs another
 section-sized read. Details and methodology in [`bench/README.md`](bench/README.md).
 

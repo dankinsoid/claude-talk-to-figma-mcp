@@ -70,17 +70,17 @@ Two rows separate the two independent effects:
 The second row is the real per-call cost, but it returns fewer nodes; the first
 row is the honest like-for-like number.
 
-## Result (3 screens, 1188 nodes)
+## Result (3 iPhone screens from Apple's kit, 468 nodes)
 
 | | tokens | vs raw |
 |---|---|---|
-| raw `JSON_REST_V1` | 360,980 | — |
-| upstream | 96,046 | −73% |
-| ours, no collapse | 64,364 | −82% |
-| ours (`read_node` default) | 14,956 | −96% |
+| raw `JSON_REST_V1` | 164,925 | — |
+| upstream | 37,536 | −77% |
+| ours, no collapse | 20,116 | −88% |
+| ours (`read_node` default) | 13,178 | −92% |
 
-Like-for-like (same nodes): **−33%**. With collapse/cull at default settings:
-**−84%, 6.4× fewer tokens**.
+Like-for-like (same nodes): **−46%**. With collapse/cull at default settings:
+**−65%, 2.8× fewer tokens**.
 
 ---
 
@@ -113,26 +113,26 @@ Ours indexes instead: `glob_nodes(name:"*player*")` returns one flat line per
 match (`id:"name".TYPE @parent [x,y wxh]`) across the whole page, and
 `grep_nodes` does the same over text content.
 
-## Result (same file, task: locate the player component)
+## Result (task: locate the keyboard components)
 
 | | tokens | |
 |---|---|---|
-| upstream `get_document_info` | 2,282 | 113 top-level stubs, names only |
-| upstream `get_node_info("Player")` | 305,099 | 3,392 nodes — one section, in full |
-| **upstream, one candidate opened** | **307,381** | and 2 of 113 top-level nodes are named *Player* |
-| **ours, `glob_nodes`** | **3,295** | 143 matches, whole page searched |
+| upstream `get_document_info` | 117 | 3 top-level stubs, names only |
+| upstream `get_node_info("iPhone")` | 417,593 | 5,059 nodes — one section, in full |
+| **upstream, one candidate opened** | **417,710** | no top-level node is named *Keyboard* |
+| **ours, `glob_nodes`** | **1,823** | 86 matches, whole page searched |
 
-**Ours is ~93× cheaper** (3,295 tok vs 307,381 — fewer is better) — and the two calls are
+**Ours is ~229× cheaper** (1,823 tok vs 417,710 — fewer is better) — and the two calls are
 not doing the same amount of work:
 upstream opened *one branch*, ours searched *everything*.
 
 The asymmetry is structural, not a matter of tuning:
 
-- upstream's cost scales with **the subtree it opens** — 305k tokens for 3,392 nodes
-- ours scales with **the number of matches** — 3.3k tokens for 143 hits
+- upstream's cost scales with **the subtree it opens** — 418k tokens for 5,059 nodes
+- ours scales with **the number of matches** — 1.8k tokens for 86 hits
 
 A deeper or wider file grows the first number and leaves the second flat. On
-this file one section is already ~305k tokens, which exceeds a 200k context
+this file one section is already ~418k tokens, which exceeds a 200k context
 window: the upstream path cannot complete the lookup at all, at any budget.
 
 ## Fixture note
@@ -143,10 +143,10 @@ touches, so the token count is identical to the full export's.
 
 ## Caveat
 
-This models the *lucky* upstream path — the target sits in a section whose name
-matches the query, so it descends correctly on the first guess. A target inside
-a generically-named container (`Frame 12`, `Group 4`) has no name to steer by,
-and the descent becomes trial and error over the 113 top-level nodes.
+This models a *generous* upstream path — one section opened, the right one. The
+kit's three top-level sections (`iPad`, `iPhone`, `iPhone Duo`) carry no hint of
+which holds a keyboard, so a real descent may open more than one, each at
+comparable cost.
 
 ---
 
@@ -160,7 +160,7 @@ its properties**.
 bun run scripts/bench-flow.ts
 ```
 
-Our side is a verbatim transcript of three calls run against the live file
+Our side is a verbatim transcript of three calls run against the kit
 (`fixtures/flow/`). Upstream's side is reconstructed from its own tool surface,
 replaying the same committed fixtures through its `filterFigmaNode`.
 
@@ -168,29 +168,29 @@ replaying the same committed fixtures through its `filterFigmaNode`.
 
 | step | ours | upstream |
 |---|---|---|
-| 1. locate `Music / Player` | `glob_nodes` — **108** | `get_document_info` — **2,282** |
-| 2. read its structure | `read_node` — **178** | `get_node_info(section)` — **393,463** |
-| 3. inspect properties | `read_node(fields:[…])` — **122** | `get_node_info(component)` — **435** |
-| **total** | **408 tok** | **396,180 tok** |
+| 1. locate `Examples/Alert` | `glob_nodes` — **28** | `get_document_info` — **117** |
+| 2. read its structure | `read_node` — **894** | `get_node_info(section)` — **417,593** |
+| 3. inspect properties | `read_node(fields:[…])` — **190** | `get_node_info(component)` — **1,984** |
+| **total** | **1,112 tok** | **419,694 tok** |
 
-**Ours is ~971× cheaper** for the same task.
+**Ours is ~377× cheaper** for the same task.
 
 ## Where the gap actually is
 
-Step 3 is the interesting one: upstream is *fine* there — 435 tokens. The
+Step 3 is the interesting one: upstream is *fine* there — 1,984 tokens. The
 component is small, so having no field projection costs little.
 
-The entire gap is **step 2 — 99% of upstream's total**. Reaching a 6-node
-component costs a 4,246-node section, because the only way down (`get_node_info`)
+The entire gap is **step 2 — 99% of upstream's total**. Reaching a 25-node
+component costs a 5,059-node section, because the only way down (`get_node_info`)
 returns everything below the node. That single call exceeds a 200k context
 window, so the flow cannot complete upstream at all.
 
-**The gap is the search, not the read.** Our compaction layer saves ~6× on a
-read (first benchmark); the indexing tools are what turn that into three orders
-of magnitude on a real task.
+**The gap is the search, not the read.** Our compaction layer saves ~2.8× on a
+read (first benchmark); the indexing tools are what turn that into two-plus
+orders of magnitude on a real task.
 
 ## Caveat
 
-Upstream's step 2 assumes it guesses the right section first try. `Music / Player`
-lives under `Playlist`, which is not a name a search for "player" would rank
-first — a wrong guess costs another section-sized read.
+Upstream's step 2 assumes it guesses the right section first try, and that the
+section it opens is the one holding the component. A wrong guess costs another
+section-sized read.

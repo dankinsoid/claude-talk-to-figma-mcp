@@ -14,7 +14,7 @@
 // its children's names, descend into the next one. Each such step pays for that
 // node's entire subtree, because get_node_info cannot return one level.
 //
-// Ours: glob_nodes(name:"*player*") — one call, flat index of matches.
+// Ours: glob_nodes(name:"*keyboard*") — one call, flat index of matches.
 //
 // Run: bun run scripts/bench-navigation.ts
 
@@ -76,7 +76,7 @@ function filterFigmaNode(node: any): any {
 const count = (n: any): number =>
 	n ? 1 + (n.children ?? []).reduce((a: number, c: any) => a + count(c), 0) : 0;
 
-const section = JSON.parse(readFileSync("bench/fixtures/nav-section-8222-94767.json", "utf8"))[0].node;
+const section = JSON.parse(readFileSync("bench/fixtures/nav-section-iphone.json", "utf8"))[0].node;
 const docInfo = JSON.parse(readFileSync("bench/fixtures/doc-info.json", "utf8"));
 
 // ── Upstream step 1: get_document_info — page's direct children, id/name/type.
@@ -88,27 +88,27 @@ const sectionFiltered = filterFigmaNode(section);
 const sectionTok = tokens(ser(sectionFiltered));
 
 // Our glob output for the same intent, captured live from the same file.
-const globOut = readFileSync("bench/fixtures/nav-glob-player.txt", "utf8");
+const globOut = readFileSync("bench/fixtures/nav-glob-keyboard.txt", "utf8");
 const globTok = tokens(globOut);
 const globHits = globOut.trimEnd().split("\n").length;
 
 const fmt = (n: number) => n.toLocaleString("en-US");
 const pageChildren = docInfo.children.length;
-const playerNamed = docInfo.children.filter((c: any) => /player/i.test(c.name)).length;
+const targetNamed = docInfo.children.filter((c: any) => /keyboard/i.test(c.name)).length;
 
 console.log(`\ntokenizer: cl100k_base (js-tiktoken)`);
 console.log(`file: "${docInfo.name}" — ${pageChildren} top-level nodes on the page`);
-console.log(`task: locate the player component(s) by name\n`);
+console.log(`task: locate the keyboard component(s) by name\n`);
 
 console.log(`── upstream (grab): no search tool, must descend`);
 console.log(`   get_document_info            ${fmt(docTok).padStart(9)} tok   (${pageChildren} top-level stubs, names only)`);
-console.log(`   get_node_info("Player")      ${fmt(sectionTok).padStart(9)} tok   (${fmt(count(sectionFiltered))} nodes — the WHOLE section, no depth param)`);
+console.log(`   get_node_info("iPhone")      ${fmt(sectionTok).padStart(9)} tok   (${fmt(count(sectionFiltered))} nodes — the WHOLE section, no depth param)`);
 console.log(`   ────────────────────────────────────────`);
 console.log(`   one candidate section        ${fmt(docTok + sectionTok).padStart(9)} tok`);
-console.log(`   ...and "Player" was 1 of ${pageChildren} top-level nodes (${playerNamed} are named *Player*), so a`);
+console.log(`   ...and the target sits 1 of ${pageChildren} top-level nodes (${targetNamed} are named *Keyboard*), so a`);
 console.log(`   miss means opening the next one at comparable cost.\n`);
 
-console.log(`── ours: glob_nodes(name:"*player*")`);
+console.log(`── ours: glob_nodes(name:"*keyboard*")`);
 console.log(`   one call                     ${fmt(globTok).padStart(9)} tok   (${globHits} matches, across the whole page)\n`);
 
 const ratio = (docTok + sectionTok) / globTok;
